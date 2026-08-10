@@ -176,33 +176,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // For deployed environments (Vercel, etc.) the backend cannot open a native dialog on the user's machine.
-        // Use the browser File System Access API when available, otherwise fall back to a hidden input[type=file] with webkitdirectory.
-        try {
-            if (window.showDirectoryPicker) {
-                const dirHandle = await window.showDirectoryPicker();
-                // We cannot obtain an absolute filesystem path in browsers for security reasons.
-                elements.folderPathInput.value = `Local: ${dirHandle.name}`;
-                state.folderHandle = dirHandle;
-                // Open the manual folder modal so user can paste the full absolute path if they want the server to scan it.
-                showModal(elements.folderPickerModal);
-                if (elements.folderPathInput) {
-                    elements.folderPathInput.select();
-                    elements.folderPathInput.focus();
-                }
-                showToast('Local folder selected in browser. To let the server scan this folder, paste the full path into the dialog and click Scan Folder. Otherwise use client-side preview.', 'info');
-                return;
-            }
-
-            // Fallback: the browser doesn't support directory handles. Show the manual folder modal
-            // and ask the user to paste the full path from their OS. Creating a hidden file input
-            // causes some browsers to show "upload" wording which is confusing — avoid that.
-            showModal(elements.folderPickerModal);
-            showToast('Your browser cannot provide a folder handle. Please paste the full folder path into the dialog and click Scan Folder.', 'info');
-        } catch (err) {
-            console.warn('Browser folder picker error:', err);
-            showToast('Folder picker is unavailable in this browser. Please run the app locally for full filesystem access.', 'error');
-        }
+        // Deployed environments such as Vercel cannot access the visitor's local filesystem.
+        // The only reliable way for the server to scan files is when it runs locally on the same machine.
+        showModal(elements.folderPickerModal);
+        showToast('This deployment cannot return a full local path. Please paste the full folder path into the dialog and click Scan Folder, or run the app locally for native browsing.', 'info');
     }
 
     async function browseTargetFolder() {
@@ -225,30 +202,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        try {
-            if (window.showDirectoryPicker) {
-                const dirHandle = await window.showDirectoryPicker();
-                elements.targetBasePathInput.value = `Local: ${dirHandle.name}`;
-                state.targetBaseHandle = dirHandle;
-                // Open the target base modal so user can paste the full absolute path for server-side use.
-                showModal(elements.targetBaseModal);
-                if (elements.targetBasePathInput) {
-                    elements.targetBasePathInput.select();
-                    elements.targetBasePathInput.focus();
-                }
-                showToast('Local target base selected in browser. To let the server configure categories here, paste the full path into the dialog and confirm.', 'info');
-                return;
-            }
-
-            // Fallback: the browser doesn't support directory handles. Show the manual target base modal
-            // and ask the user to paste the full path from their OS. Avoid creating hidden file inputs
-            // which can show upload wording in the browser UI.
-            showModal(elements.targetBaseModal);
-            showToast('Your browser cannot provide a folder handle. Please paste the full target base path into the dialog and confirm.', 'info');
-        } catch (err) {
-            console.warn('Browser folder picker error:', err);
-            showToast('Folder picker is unavailable in this browser. Please run the app locally for full filesystem access.', 'error');
-        }
+        // Deployed environments such as Vercel cannot access the visitor's local filesystem.
+        // The only reliable way for the server to configure categories is when it runs locally on the same machine.
+        showModal(elements.targetBaseModal);
+        showToast('This deployment cannot return a full local path. Please paste the full target base path into the dialog and confirm, or run the app locally for native browsing.', 'info');
     }
 
     /**

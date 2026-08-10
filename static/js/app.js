@@ -103,11 +103,13 @@ document.addEventListener('DOMContentLoaded', () => {
         btnCancelTargetBaseModal: document.getElementById('btnCancelTargetBaseModal'),
         btnCloseTargetBaseModal: document.getElementById('btnCloseTargetBaseModal'),
         folderPickerModal: document.getElementById('folderPickerModal'),
+        folderSelectionStatus: document.getElementById('folderSelectionStatus'),
         folderPathInput: document.getElementById('folderPathInput'),
         btnConfirmFolderModal: document.getElementById('btnConfirmFolderModal'),
         btnCancelFolderModal: document.getElementById('btnCancelFolderModal'),
         btnCloseFolderModal: document.getElementById('btnCloseFolderModal'),
         btnBrowseSourceOs: document.getElementById('btnBrowseSourceOs'),
+        targetSelectionStatus: document.getElementById('targetSelectionStatus'),
         createCategoryModal: document.getElementById('createCategoryModal'),
         newCategoryNameInput: document.getElementById('newCategoryNameInput'),
         btnConfirmCategoryModal: document.getElementById('btnConfirmCategoryModal'),
@@ -213,7 +215,10 @@ document.addEventListener('DOMContentLoaded', () => {
             state.browserScanMode = true;
             elements.folderPathInput.value = dirHandle.name;
             elements.folderPathInput.title = `Local folder selected: ${dirHandle.name}`;
-            await scanBrowserFolder(dirHandle);
+            if (elements.folderSelectionStatus) {
+                elements.folderSelectionStatus.textContent = `Selected folder: ${dirHandle.name}. Click Scan Folder to load files.`;
+            }
+            showToast(`Selected local folder ${dirHandle.name}. Click Scan Folder to load files.`, 'success');
         } catch (err) {
             if (err.name === 'AbortError') {
                 showToast('Folder selection cancelled.', 'info');
@@ -275,8 +280,11 @@ document.addEventListener('DOMContentLoaded', () => {
             state.browserFolderHandle = null;
             elements.targetBasePathInput.value = dirHandle.name;
             elements.targetBasePathInput.title = `Local folder selected: ${dirHandle.name}`;
+            if (elements.targetSelectionStatus) {
+                elements.targetSelectionStatus.textContent = `Selected target folder: ${dirHandle.name}. Click Confirm Base Directory to save this location.`;
+            }
             showModal(elements.targetBaseModal);
-            showToast('Local target selected in browser. Paste the full absolute path here if you want server-side category configuration, or run the app locally.', 'info');
+            showToast(`Selected local target folder ${dirHandle.name}. Click Confirm Base Directory to save it.`, 'success');
         } catch (err) {
             if (err.name === 'AbortError') {
                 showToast('Folder selection cancelled.', 'info');
@@ -340,6 +348,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // EVENT LISTENERS
     // ==========================================
+    function updateFolderStatusText(isTarget = false, text = '') {
+        const element = isTarget ? elements.targetSelectionStatus : elements.folderSelectionStatus;
+        if (element) {
+            element.textContent = text;
+        }
+    }
+
     function setupEventListeners() {
         // Theme Toggle
         elements.btnThemeToggle?.addEventListener('click', () => {
@@ -358,10 +373,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const path = elements.targetBasePathInput.value.trim();
             if (path) {
                 state.targetBasePath = path;
+                state.browserTargetHandle = null;
                 localStorage.setItem('media_categorizer_target_base', path);
                 updateTargetBaseUI();
                 fetchCategories();
                 hideModal(elements.targetBaseModal);
+                if (elements.targetSelectionStatus) {
+                    elements.targetSelectionStatus.textContent = `Confirmed target base: ${path}`;
+                }
                 showToast(`Target base directory set: ${path}`, 'success');
             } else {
                 showToast('Please enter or browse a valid target base folder path.', 'error');
@@ -369,11 +388,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Browse Target OS button
-        elements.btnBrowseTargetOs?.addEventListener('click', browseTargetFolder);
+        elements.btnBrowseTargetOs?.addEventListener('click', () => {
+            if (elements.targetSelectionStatus) {
+                elements.targetSelectionStatus.textContent = 'Pick a target folder, then confirm to save it.';
+            }
+            browseTargetFolder();
+        });
 
 
         // ─── Source Folder Dialog ───
-        elements.btnBrowseFolder?.addEventListener('click', () => showModal(elements.folderPickerModal));
+        elements.btnBrowseFolder?.addEventListener('click', () => {
+            if (elements.folderSelectionStatus) {
+                elements.folderSelectionStatus.textContent = 'No folder selected yet.';
+            }
+            showModal(elements.folderPickerModal);
+        });
         elements.btnCancelFolderModal?.addEventListener('click', () => hideModal(elements.folderPickerModal));
         elements.btnCloseFolderModal?.addEventListener('click', () => hideModal(elements.folderPickerModal));
 
@@ -388,6 +417,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!state.browserFolderHandle || inputPath !== state.folderPath) {
                     state.browserFolderHandle = null;
                     state.browserScanMode = false;
+                }
+                if (elements.folderSelectionStatus) {
+                    elements.folderSelectionStatus.textContent = 'Scanning folder...';
                 }
                 hideModal(elements.folderPickerModal);
                 scanFolder(inputPath);

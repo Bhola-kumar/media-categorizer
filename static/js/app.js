@@ -221,67 +221,73 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Opens native OS or Browser Folder Selector for base target directory directly without intermediate modal.
+     * Automatically configures target base directory upon selection.
+     */
     async function browseTargetFolder() {
-        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
-            showToast('Opening native folder selector on server...', 'info');
-            try {
-                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
-                const data = await res.json();
-                if (data.success && data.path) {
-                    elements.targetBasePathInput.value = data.path;
-                    showToast(`Selected target base: ${data.path}`, 'success');
-                    return;
-                }
-                showToast(data.message || 'Unable to open folder picker on server.', 'error');
-                return;
-            } catch (err) {
-                console.warn('Native dialog error:', err);
-                showToast('Native folder picker failed. Please try again.', 'error');
-                return;
-            }
-        }
-
-        if (state.backendEnabled) {
-            showToast('Opening native folder selector on server...', 'info');
-            try {
-                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
-                const data = await res.json();
-                if (data.success && data.path) {
-                    elements.targetBasePathInput.value = data.path;
-                    showToast(`Selected target base: ${data.path}`, 'success');
-                    return;
-                }
-                showToast(data.message || 'Unable to open folder picker on server.', 'error');
-                return;
-            } catch (err) {
-                console.warn('Native dialog error:', err);
-                showToast('Native folder picker failed. Please try again.', 'error');
-                return;
-            }
-        }
-
-        if (!window.showDirectoryPicker) {
-            showModal(elements.targetBaseModal);
-            showToast('Your browser does not support folder access. Paste the full target base path into the dialog and confirm, or run the app locally for native browsing.', 'info');
-            return;
-        }
-
+        if (state.isBrowsing) return;
+        state.isBrowsing = true;
         try {
-            const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
-            state.browserTargetHandle = dirHandle;
-            state.browserFolderHandle = null;
-            elements.targetBasePathInput.value = dirHandle.name;
-            elements.targetBasePathInput.title = `Local folder selected: ${dirHandle.name}`;
-            showModal(elements.targetBaseModal);
-            showToast('Local target selected in browser. Paste the full absolute path here if you want server-side category configuration, or run the app locally.', 'info');
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                showToast('Folder selection cancelled.', 'info');
-            } else {
-                console.error('Browser folder picker error:', err);
-                showToast('Unable to access target folder in browser. Please run locally for full filesystem access.', 'error');
+            // 1. Backend native folder picker (when running with Python/Flask backend locally)
+            if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+                showToast('Opening target folder selector...', 'info');
+                try {
+                    const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success && data.path) {
+                        setTargetBasePath(data.path);
+                        return;
+                    }
+                    if (data.message && (data.message.includes('Cancelled') || data.message.includes('No folder selected'))) {
+                        showToast('Folder selection cancelled.', 'info');
+                    } else if (data.message) {
+                        showToast(data.message, 'error');
+                    }
+                    return;
+                } catch (err) {
+                    console.warn('Native dialog error:', err);
+                    showToast('Folder picker failed. Please try again.', 'error');
+                    return;
+                }
             }
+
+            // 2. Native browser directory picker API (for modern web browsers e.g. Chrome/Edge)
+            if (window.showDirectoryPicker) {
+                try {
+                    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                    state.browserTargetHandle = dirHandle;
+                    setTargetBasePath(dirHandle.name);
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        showToast('Folder selection cancelled.', 'info');
+                    } else {
+                        console.error('Browser folder picker error:', err);
+                        showToast('Unable to access target folder in browser.', 'error');
+                    }
+                }
+                return;
+            }
+
+            // 3. Fallback for legacy browsers without showDirectoryPicker and without backend
+            if (elements.targetBaseModal) {
+                elements.targetBasePathInput.value = state.targetBasePath || '';
+                showModal(elements.targetBaseModal);
+            }
+        } finally {
+            state.isBrowsing = false;
         }
+    }
+
+    function setTargetBasePath(path) {
+        if (!path) return;
+        state.targetBasePath = path;
+        localStorage.setItem('media_categorizer_target_base', path);
+        if (elements.targetBasePathInput) elements.targetBasePathInput.value = path;
+        updateTargetBaseUI();
+        fetchCategories();
+        if (elements.targetBaseModal) hideModal(elements.targetBaseModal);
+        showToast(`Target base directory set: ${path}`, 'success');
     }
 
     /**
@@ -345,8 +351,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // ─── Target Base Location ───
-        elements.btnChangeTargetBase?.addEventListener('click', openTargetBaseModal);
-        elements.targetBaseBadge?.addEventListener('click', openTargetBaseModal);
+        elements.btnChangeTargetBase?.addEventListener('click', browseTargetFolder);
+        elements.targetBaseBadge?.addEventListener('click', browseTargetFolder);
 
         elements.btnCancelTargetBaseModal?.addEventListener('click', () => hideModal(elements.targetBaseModal));
         elements.btnCloseTargetBaseModal?.addEventListener('click', () => hideModal(elements.targetBaseModal));
@@ -354,12 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.btnConfirmTargetBaseModal?.addEventListener('click', () => {
             const path = elements.targetBasePathInput.value.trim();
             if (path) {
-                state.targetBasePath = path;
-                localStorage.setItem('media_categorizer_target_base', path);
-                updateTargetBaseUI();
-                fetchCategories();
-                hideModal(elements.targetBaseModal);
-                showToast(`Target base directory set: ${path}`, 'success');
+                setTargetBasePath(path);
             } else {
                 showToast('Please enter or browse a valid target base folder path.', 'error');
             }
@@ -505,8 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openTargetBaseModal() {
-        elements.targetBasePathInput.value = state.targetBasePath || '';
-        showModal(elements.targetBaseModal);
+        browseTargetFolder();
     }
 
     function setupModalBackdropClicks() {
@@ -979,9 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.activeAudioPlayer.play().catch(() => {});
         }
 
-        if (file.fileObject) {
-            showToast('Previewing browser-selected file. Delete and categorize actions require local server access.', 'info');
-        }
+
 
         renderFileList();
         const activeRow = elements.fileListContainer.children[index];

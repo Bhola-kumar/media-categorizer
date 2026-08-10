@@ -157,70 +157,67 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
 
     /**
-     * Opens native Windows Folder Selector window via backend helper.
-     * ZERO Chrome 'Upload' warnings.
+     * Opens native OS or Browser Folder Selector directly without requiring intermediate modal.
+     * Automatically scans and loads files upon folder selection.
      */
     async function browseSourceFolder() {
-        // If running on localhost, prefer the server-side native dialog (server has access to filesystem).
-        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
-            showToast('Opening native folder selector on server...', 'info');
-            try {
-                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
-                const data = await res.json();
-                if (data.success && data.path) {
-                    elements.folderPathInput.value = data.path;
-                    showToast('Folder selected. Click Scan Folder to load files.', 'success');
-                    return;
-                }
-                showToast(data.message || 'Unable to open folder picker on server.', 'error');
-                return;
-            } catch (err) {
-                console.warn('Native dialog error:', err);
-                showToast('Native folder picker failed. Please try again.', 'error');
-                return;
-            }
-        }
-
-        if (state.backendEnabled) {
-            showToast('Opening native folder selector on server...', 'info');
-            try {
-                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
-                const data = await res.json();
-                if (data.success && data.path) {
-                    elements.folderPathInput.value = data.path;
-                    showToast('Folder selected. Click Scan Folder to load files.', 'success');
-                    return;
-                }
-                showToast(data.message || 'Unable to open folder picker on server.', 'error');
-                return;
-            } catch (err) {
-                console.warn('Native dialog error:', err);
-                showToast('Native folder picker failed. Please try again.', 'error');
-                return;
-            }
-        }
-
-        if (!window.showDirectoryPicker) {
-            showModal(elements.folderPickerModal);
-            showToast('Your browser does not support folder access. Paste the full folder path into the dialog and click Scan Folder, or run the app locally for native browsing.', 'info');
-            return;
-        }
-
+        if (state.isBrowsing) return;
+        state.isBrowsing = true;
         try {
-            const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
-            state.browserFolderHandle = dirHandle;
-            state.browserTargetHandle = null;
-            state.browserScanMode = true;
-            elements.folderPathInput.value = dirHandle.name;
-            elements.folderPathInput.title = `Local folder selected: ${dirHandle.name}`;
-            await scanBrowserFolder(dirHandle);
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                showToast('Folder selection cancelled.', 'info');
-            } else {
-                console.error('Browser folder picker error:', err);
-                showToast('Unable to access folder in browser. Please run locally for full filesystem access.', 'error');
+            // 1. Backend native folder picker (when running with Python/Flask backend locally)
+            if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+                showToast('Opening folder selector...', 'info');
+                try {
+                    const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success && data.path) {
+                        if (elements.folderPathInput) elements.folderPathInput.value = data.path;
+                        hideModal(elements.folderPickerModal);
+                        await scanFolder(data.path);
+                        return;
+                    }
+                    if (data.message && (data.message.includes('Cancelled') || data.message.includes('No folder selected'))) {
+                        showToast('Folder selection cancelled.', 'info');
+                    } else if (data.message) {
+                        showToast(data.message, 'error');
+                    }
+                    return;
+                } catch (err) {
+                    console.warn('Native dialog error:', err);
+                    showToast('Folder picker failed. Please try again.', 'error');
+                    return;
+                }
             }
+
+            // 2. Native browser directory picker API (for modern web browsers e.g. Chrome/Edge)
+            if (window.showDirectoryPicker) {
+                try {
+                    const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+                    state.browserFolderHandle = dirHandle;
+                    state.browserTargetHandle = null;
+                    state.browserScanMode = true;
+                    if (elements.folderPathInput) {
+                        elements.folderPathInput.value = dirHandle.name;
+                        elements.folderPathInput.title = `Local folder selected: ${dirHandle.name}`;
+                    }
+                    hideModal(elements.folderPickerModal);
+                    await scanBrowserFolder(dirHandle);
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        showToast('Folder selection cancelled.', 'info');
+                    } else {
+                        console.error('Browser folder picker error:', err);
+                        showToast('Unable to access folder in browser.', 'error');
+                    }
+                }
+                return;
+            }
+
+            // 3. Fallback for legacy browsers without showDirectoryPicker and without backend
+            showModal(elements.folderPickerModal);
+            showToast('Your browser does not support folder picker dialog. Please paste the folder path into the dialog and click Scan Folder.', 'info');
+        } finally {
+            state.isBrowsing = false;
         }
     }
 
@@ -373,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
         // ─── Source Folder Dialog ───
-        elements.btnBrowseFolder?.addEventListener('click', () => showModal(elements.folderPickerModal));
+        elements.btnBrowseFolder?.addEventListener('click', browseSourceFolder);
         elements.btnCancelFolderModal?.addEventListener('click', () => hideModal(elements.folderPickerModal));
         elements.btnCloseFolderModal?.addEventListener('click', () => hideModal(elements.folderPickerModal));
 
@@ -600,7 +597,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await scanBrowserFolder(state.browserFolderHandle);
                 return;
             }
-            showModal(elements.folderPickerModal);
+            browseSourceFolder();
             return;
         }
 

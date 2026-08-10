@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
         imageRotation: 0,
         draggedFilePath: null,
         browserFolderHandle: null,
+        browserFolderPath: '',
         browserTargetHandle: null,
         browserScanMode: false,
         activeObjectUrl: null,
@@ -171,6 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 if (data.success && data.path) {
                     elements.folderPathInput.value = data.path;
+                    state.browserFolderHandle = null;
+                    state.browserScanMode = false;
+                    state.browserFolderPath = data.path;
                     showToast('Folder selected. Click Scan Folder to load files.', 'success');
                     return;
                 }
@@ -213,6 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.browserFolderHandle = dirHandle;
             state.browserTargetHandle = null;
             state.browserScanMode = true;
+            state.browserFolderPath = dirHandle.name;
             elements.folderPathInput.value = dirHandle.name;
             elements.folderPathInput.title = `Local folder selected: ${dirHandle.name}`;
             if (elements.folderSelectionStatus) {
@@ -414,9 +419,11 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.btnConfirmFolderModal?.addEventListener('click', () => {
             const inputPath = elements.folderPathInput.value.trim();
             if (inputPath) {
-                if (!state.browserFolderHandle || inputPath !== state.folderPath) {
+                const useBrowserHandle = state.browserScanMode && state.browserFolderHandle && inputPath === state.browserFolderPath;
+                if (!useBrowserHandle) {
                     state.browserFolderHandle = null;
                     state.browserScanMode = false;
+                    state.browserFolderPath = '';
                 }
                 if (elements.folderSelectionStatus) {
                     elements.folderSelectionStatus.textContent = 'Scanning folder...';
@@ -645,7 +652,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             showToast('Scanning folder contents...', 'info');
-            if (state.browserScanMode && state.browserFolderHandle) {
+            const useBrowserHandle = state.browserScanMode && state.browserFolderHandle && folderPath === state.browserFolderPath;
+            if (useBrowserHandle) {
                 await scanBrowserFolder(state.browserFolderHandle);
                 return;
             }

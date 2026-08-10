@@ -759,15 +759,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            state.categories = [];
-            renderCategoryTiles();
-
             const res = await fetch('/api/categories', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ target_base_path: state.targetBasePath })
             });
             const data = await res.json();
+            if (data.target_base_path) {
+                state.targetBasePath = data.target_base_path;
+                localStorage.setItem('media_categorizer_target_base', data.target_base_path);
+                updateTargetBaseUI();
+            }
             state.categories = data.categories || [];
             renderCategoryTiles();
         } catch (err) {

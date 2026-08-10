@@ -113,7 +113,12 @@ def resolve_full_folder_path(folder_input):
         except Exception:
             continue
 
-    return None
+    # 3. Fallback: resolve as relative path to CWD or Home
+    try:
+        candidate = Path.cwd() / clean_path
+        return str(candidate.resolve())
+    except Exception:
+        return os.path.abspath(clean_path)
 
 @app.route('/api/resolve-path', methods=['POST'])
 def resolve_path_endpoint():
@@ -245,8 +250,16 @@ def create_category():
     parent_folder = data.get('parent_folder', '').strip()
     category_name = data.get('category_name', '').strip()
 
-    if not parent_folder or not os.path.exists(parent_folder):
-        return jsonify({'error': 'Target base directory is not configured or does not exist.'}), 400
+    if not parent_folder:
+        return jsonify({'error': 'Target base directory is required.'}), 400
+
+    resolved_parent = resolve_full_folder_path(parent_folder) or os.path.abspath(parent_folder)
+
+    if not os.path.exists(resolved_parent):
+        try:
+            os.makedirs(resolved_parent, exist_ok=True)
+        except Exception as e:
+            return jsonify({'error': f'Target base directory could not be created: {str(e)}'}), 400
 
     if not category_name:
         return jsonify({'error': 'Category folder name is required.'}), 400
@@ -255,7 +268,7 @@ def create_category():
     if not clean_name:
         return jsonify({'error': 'Invalid category name.'}), 400
 
-    target_path = os.path.join(parent_folder, clean_name)
+    target_path = os.path.join(resolved_parent, clean_name)
     try:
         os.makedirs(target_path, exist_ok=True)
         return jsonify({

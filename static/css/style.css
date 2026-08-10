@@ -1260,12 +1260,6 @@ input {
     box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
-.path-status-text {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
 .path-suggestions {
     display: flex;
     align-items: center;

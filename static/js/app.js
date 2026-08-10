@@ -156,36 +156,109 @@ document.addEventListener('DOMContentLoaded', () => {
      * ZERO Chrome 'Upload' warnings.
      */
     async function browseSourceFolder() {
-        showToast('Opening Windows Folder Selector...', 'info');
-        try {
-            const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
-            const data = await res.json();
-            if (data.success && data.path) {
-                elements.folderPathInput.value = data.path;
-                showToast('Folder selected. Click Scan Folder to load files.', 'success');
+        // If running on localhost, prefer the server-side native dialog (server has access to filesystem).
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+            showToast('Opening native folder selector on server...', 'info');
+            try {
+                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.path) {
+                    elements.folderPathInput.value = data.path;
+                    showToast('Folder selected. Click Scan Folder to load files.', 'success');
+                    return;
+                }
+                showToast(data.message || 'Unable to open folder picker on server.', 'error');
+                return;
+            } catch (err) {
+                console.warn('Native dialog error:', err);
+                showToast('Native folder picker failed. Please try again.', 'error');
                 return;
             }
-            showToast(data.message || 'Unable to open folder picker.', 'error');
+        }
+
+        // For deployed environments (Vercel, etc.) the backend cannot open a native dialog on the user's machine.
+        // Use the browser File System Access API when available, otherwise fall back to a hidden input[type=file] with webkitdirectory.
+        try {
+            if (window.showDirectoryPicker) {
+                const dirHandle = await window.showDirectoryPicker();
+                // We cannot obtain an absolute filesystem path in browsers for security reasons.
+                elements.folderPathInput.value = `Local: ${dirHandle.name}`;
+                state.folderHandle = dirHandle;
+                showToast('Local folder selected in browser. Note: deployed server cannot access local files. Run the app locally to scan and manage files.', 'info');
+                return;
+            }
+
+            // Fallback: use input webkitdirectory to allow the user to pick a local folder (reads files client-side)
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.webkitdirectory = true; // supported in Chromium-based browsers
+            input.multiple = true;
+            input.style.display = 'none';
+            document.body.appendChild(input);
+            input.addEventListener('change', (ev) => {
+                const files = Array.from(ev.target.files || []);
+                if (files.length > 0) {
+                    elements.folderPathInput.value = `Local: ${files[0].webkitRelativePath.split('/')[0]}`;
+                    state.pendingFolderFiles = files;
+                    showToast('Local folder selected via file input. Run the app locally to scan/manage files or use upload workflows.', 'info');
+                }
+                input.remove();
+            });
+            input.click();
         } catch (err) {
-            console.warn('Native dialog error:', err);
-            showToast('Native folder picker failed. Please try again.', 'error');
+            console.warn('Browser folder picker error:', err);
+            showToast('Folder picker is unavailable in this browser. Please run the app locally for full filesystem access.', 'error');
         }
     }
 
     async function browseTargetFolder() {
-        showToast('Opening Windows Folder Selector...', 'info');
-        try {
-            const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
-            const data = await res.json();
-            if (data.success && data.path) {
-                elements.targetBasePathInput.value = data.path;
-                showToast(`Selected target base: ${data.path}`, 'success');
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+            showToast('Opening native folder selector on server...', 'info');
+            try {
+                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.path) {
+                    elements.targetBasePathInput.value = data.path;
+                    showToast(`Selected target base: ${data.path}`, 'success');
+                    return;
+                }
+                showToast(data.message || 'Unable to open folder picker on server.', 'error');
+                return;
+            } catch (err) {
+                console.warn('Native dialog error:', err);
+                showToast('Native folder picker failed. Please try again.', 'error');
                 return;
             }
-            showToast(data.message || 'Unable to open folder picker.', 'error');
+        }
+
+        try {
+            if (window.showDirectoryPicker) {
+                const dirHandle = await window.showDirectoryPicker();
+                elements.targetBasePathInput.value = `Local: ${dirHandle.name}`;
+                state.targetBaseHandle = dirHandle;
+                showToast('Local target base selected in browser. Note: deployed server cannot access local files. Run the app locally to configure target base.', 'info');
+                return;
+            }
+
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.webkitdirectory = true;
+            input.multiple = true;
+            input.style.display = 'none';
+            document.body.appendChild(input);
+            input.addEventListener('change', (ev) => {
+                const files = Array.from(ev.target.files || []);
+                if (files.length > 0) {
+                    elements.targetBasePathInput.value = `Local: ${files[0].webkitRelativePath.split('/')[0]}`;
+                    state.pendingTargetFiles = files;
+                    showToast('Local target base selected via file input. Run the app locally to configure target base.', 'info');
+                }
+                input.remove();
+            });
+            input.click();
         } catch (err) {
-            console.warn('Native dialog error:', err);
-            showToast('Native folder picker failed. Please try again.', 'error');
+            console.warn('Browser folder picker error:', err);
+            showToast('Folder picker is unavailable in this browser. Please run the app locally for full filesystem access.', 'error');
         }
     }
 

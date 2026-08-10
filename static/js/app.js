@@ -24,6 +24,11 @@ document.addEventListener('DOMContentLoaded', () => {
         imageScale: 1.0,
         imageRotation: 0,
         draggedFilePath: null,
+        browserFolderHandle: null,
+        browserTargetHandle: null,
+        browserScanMode: false,
+        activeObjectUrl: null,
+        backendEnabled: location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:',
         isBrowsing: false  // debounce lock for browse buttons
     };
 
@@ -176,10 +181,47 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Deployed environments such as Vercel cannot access the visitor's local filesystem.
-        // The only reliable way for the server to scan files is when it runs locally on the same machine.
-        showModal(elements.folderPickerModal);
-        showToast('This deployment cannot return a full local path. Please paste the full folder path into the dialog and click Scan Folder, or run the app locally for native browsing.', 'info');
+        if (state.backendEnabled) {
+            showToast('Opening native folder selector on server...', 'info');
+            try {
+                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.path) {
+                    elements.folderPathInput.value = data.path;
+                    showToast('Folder selected. Click Scan Folder to load files.', 'success');
+                    return;
+                }
+                showToast(data.message || 'Unable to open folder picker on server.', 'error');
+                return;
+            } catch (err) {
+                console.warn('Native dialog error:', err);
+                showToast('Native folder picker failed. Please try again.', 'error');
+                return;
+            }
+        }
+
+        if (!window.showDirectoryPicker) {
+            showModal(elements.folderPickerModal);
+            showToast('Your browser does not support folder access. Paste the full folder path into the dialog and click Scan Folder, or run the app locally for native browsing.', 'info');
+            return;
+        }
+
+        try {
+            const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+            state.browserFolderHandle = dirHandle;
+            state.browserTargetHandle = null;
+            state.browserScanMode = true;
+            elements.folderPathInput.value = dirHandle.name;
+            elements.folderPathInput.title = `Local folder selected: ${dirHandle.name}`;
+            await scanBrowserFolder(dirHandle);
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                showToast('Folder selection cancelled.', 'info');
+            } else {
+                console.error('Browser folder picker error:', err);
+                showToast('Unable to access folder in browser. Please run locally for full filesystem access.', 'error');
+            }
+        }
     }
 
     async function browseTargetFolder() {
@@ -202,16 +244,57 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Deployed environments such as Vercel cannot access the visitor's local filesystem.
-        // The only reliable way for the server to configure categories is when it runs locally on the same machine.
-        showModal(elements.targetBaseModal);
-        showToast('This deployment cannot return a full local path. Please paste the full target base path into the dialog and confirm, or run the app locally for native browsing.', 'info');
+        if (state.backendEnabled) {
+            showToast('Opening native folder selector on server...', 'info');
+            try {
+                const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.path) {
+                    elements.targetBasePathInput.value = data.path;
+                    showToast(`Selected target base: ${data.path}`, 'success');
+                    return;
+                }
+                showToast(data.message || 'Unable to open folder picker on server.', 'error');
+                return;
+            } catch (err) {
+                console.warn('Native dialog error:', err);
+                showToast('Native folder picker failed. Please try again.', 'error');
+                return;
+            }
+        }
+
+        if (!window.showDirectoryPicker) {
+            showModal(elements.targetBaseModal);
+            showToast('Your browser does not support folder access. Paste the full target base path into the dialog and confirm, or run the app locally for native browsing.', 'info');
+            return;
+        }
+
+        try {
+            const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+            state.browserTargetHandle = dirHandle;
+            state.browserFolderHandle = null;
+            elements.targetBasePathInput.value = dirHandle.name;
+            elements.targetBasePathInput.title = `Local folder selected: ${dirHandle.name}`;
+            showModal(elements.targetBaseModal);
+            showToast('Local target selected in browser. Paste the full absolute path here if you want server-side category configuration, or run the app locally.', 'info');
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                showToast('Folder selection cancelled.', 'info');
+            } else {
+                console.error('Browser folder picker error:', err);
+                showToast('Unable to access target folder in browser. Please run locally for full filesystem access.', 'error');
+            }
+        }
     }
 
     /**
      * Loads common Windows system directories as quick select chips inside modals.
      */
     async function loadQuickFolders() {
+        if (!state.backendEnabled) {
+            return;
+        }
+
         try {
             const res = await fetch('/api/quick-folders');
             const data = await res.json();
@@ -302,6 +385,10 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.btnConfirmFolderModal?.addEventListener('click', () => {
             const inputPath = elements.folderPathInput.value.trim();
             if (inputPath) {
+                if (!state.browserFolderHandle || inputPath !== state.folderPath) {
+                    state.browserFolderHandle = null;
+                    state.browserScanMode = false;
+                }
                 hideModal(elements.folderPickerModal);
                 scanFolder(inputPath);
             } else {
@@ -508,7 +595,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // FOLDER SCANNING & API CALLS
     // ==========================================
     async function scanFolder(folderPath = '') {
-        if (!folderPath) { showModal(elements.folderPickerModal); return; }
+        if (!folderPath) {
+            if (state.browserFolderHandle) {
+                await scanBrowserFolder(state.browserFolderHandle);
+                return;
+            }
+            showModal(elements.folderPickerModal);
+            return;
+        }
 
         const scanButton = elements.btnConfirmFolderModal;
         const originalButtonText = scanButton?.textContent;
@@ -519,6 +613,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             showToast('Scanning folder contents...', 'info');
+            if (state.browserScanMode && state.browserFolderHandle) {
+                await scanBrowserFolder(state.browserFolderHandle);
+                return;
+            }
+
+            if (!state.backendEnabled) {
+                showToast('Server-side scanning is unavailable on this deployment. Use the browser folder picker or run the app locally.', 'error');
+                return;
+            }
+
             const res = await fetch('/api/scan-folder', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -557,6 +661,97 @@ document.addEventListener('DOMContentLoaded', () => {
                 scanButton.textContent = originalButtonText || 'Scan Folder';
             }
         }
+    }
+
+    async function scanBrowserFolder(dirHandle) {
+        const files = [];
+        const rootName = dirHandle.name;
+
+        async function walkDirectory(handle, relativePath = '') {
+            for await (const entry of handle.values()) {
+                if (entry.kind === 'directory') {
+                    await walkDirectory(entry, `${relativePath}${entry.name}/`);
+                    continue;
+                }
+
+                const ext = entry.name.split('.').pop()?.toLowerCase();
+                const mediaType = getBrowserMediaType(entry.name);
+                if (!mediaType) continue;
+
+                try {
+                    const file = await entry.getFile();
+                    files.push({
+                        id: `${relativePath}${entry.name}`,
+                        name: entry.name,
+                        path: `${rootName}/${relativePath}${entry.name}`,
+                        size: file.size,
+                        formatted_size: formatBytes(file.size),
+                        media_type: mediaType,
+                        mime_type: file.type || `${mediaType}/*`,
+                        extension: `.${ext}`,
+                        modified_time: file.lastModified,
+                        modified_formatted: new Date(file.lastModified).toLocaleString(),
+                        fileObject: file
+                    });
+                } catch (err) {
+                    console.warn('Failed to read file from browser handle:', err);
+                }
+            }
+        }
+
+        try {
+            await walkDirectory(dirHandle);
+            files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+            state.folderPath = rootName;
+            state.folderName = rootName;
+            state.files = files;
+            state.selectedFileIds.clear();
+            state.activeFileIndex = -1;
+            state.selectionMode = 'manual';
+            state.searchQuery = '';
+            state.activeFilter = 'all';
+            if (elements.searchInput) elements.searchInput.value = '';
+            if (elements.btnClearSearch) elements.btnClearSearch.hidden = true;
+
+            elements.currentFolderPath.textContent = `${rootName} (Local)`;
+            elements.currentFolderPath.title = `${rootName} (Local browser folder)`;
+
+            updateTargetBaseUI();
+            updateCategoryCounts({
+                total_count: files.length,
+                image_count: files.filter(f => f.media_type === 'image').length,
+                video_count: files.filter(f => f.media_type === 'video').length,
+                audio_count: files.filter(f => f.media_type === 'audio').length
+            });
+
+            applyFilters();
+            clearMediaViewer();
+
+            showToast(`Loaded ${files.length} local media files from ${rootName}`, 'success');
+        } catch (err) {
+            console.error('Browser folder scan failed:', err);
+            showToast('Failed to scan folder in browser.', 'error');
+        }
+    }
+
+    function getBrowserMediaType(filename) {
+        const ext = filename.split('.').pop()?.toLowerCase();
+        if (!ext) return null;
+        const imageExts = ['jpg','jpeg','png','gif','webp','bmp','svg','tiff'];
+        const videoExts = ['mp4','webm','ogg','mov','mkv','avi','wmv','m4v'];
+        const audioExts = ['mp3','wav','flac','m4a','aac','ogg','wma'];
+        if (imageExts.includes(ext)) return 'image';
+        if (videoExts.includes(ext)) return 'video';
+        if (audioExts.includes(ext)) return 'audio';
+        return null;
+    }
+
+    function formatBytes(bytes) {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
     }
 
     async function fetchCategories() {
@@ -738,6 +933,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // UPPER PANE - MEDIA VIEWER
     // ==========================================
+    function revokeActiveObjectUrl() {
+        if (state.activeObjectUrl) {
+            URL.revokeObjectURL(state.activeObjectUrl);
+            state.activeObjectUrl = null;
+        }
+    }
+
     function selectMediaIndex(index) {
         if (index < 0 || index >= state.filteredFiles.length) return;
         state.activeFileIndex = index;
@@ -748,7 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.mediaTypeBadge.textContent = file.media_type.toUpperCase();
         elements.mediaSizeBadge.textContent = file.formatted_size;
         elements.mediaIndexBadge.textContent = `${index + 1} of ${state.filteredFiles.length}`;
-        elements.btnDeleteMedia.disabled = false;
+        elements.btnDeleteMedia.disabled = !!file.fileObject;
 
         elements.viewerEmptyState.hidden = true;
         elements.imageViewerMode.hidden = true;
@@ -757,7 +959,12 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.activeVideoPlayer.pause();
         elements.activeAudioPlayer.pause();
 
-        const mediaUrl = `/api/media?path=${encodeURIComponent(file.path)}`;
+        revokeActiveObjectUrl();
+
+        const mediaUrl = file.fileObject ? URL.createObjectURL(file.fileObject) : `/api/media?path=${encodeURIComponent(file.path)}`;
+        if (file.fileObject) {
+            state.activeObjectUrl = mediaUrl;
+        }
 
         if (file.media_type === 'image') {
             resetImageTransform();
@@ -773,6 +980,10 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.activeAudioPlayer.src = mediaUrl;
             elements.audioViewerMode.hidden = false;
             elements.activeAudioPlayer.play().catch(() => {});
+        }
+
+        if (file.fileObject) {
+            showToast('Previewing browser-selected file. Delete and categorize actions require local server access.', 'info');
         }
 
         renderFileList();

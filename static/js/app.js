@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTargetBaseUI();
         renderCategoryTiles();
         loadQuickFolders();
-        if (state.targetBasePath) {
+        if (state.targetBasePath && state.backendEnabled) {
             fetchCategories();
         }
     }
@@ -459,9 +459,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ─── Category Creation ───
         elements.btnCreateCategory?.addEventListener('click', () => {
-            if (!state.targetBasePath) {
+            if (!state.targetBasePath && !state.browserTargetHandle) {
                 showToast('Please configure your Target Base Directory first.', 'error');
-                openTargetBaseModal();
+                browseTargetFolder();
                 return;
             }
             elements.newCategoryNameInput.value = '';
@@ -752,12 +752,61 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchCategories() {
-        if (!state.targetBasePath) {
+        if (!state.targetBasePath && !state.browserTargetHandle) {
             state.categories = [];
             renderCategoryTiles();
             return;
         }
 
+        // BROWSER MODE: If browserTargetHandle is available, scan categories directly from local PC directory handle
+        if (state.browserTargetHandle) {
+            try {
+                const categories = [];
+                for await (const entry of state.browserTargetHandle.values()) {
+                    if (entry.kind === 'directory' && !entry.name.startsWith('.')) {
+                        let imgCnt = 0, vidCnt = 0, audCnt = 0, totalBytes = 0;
+                        try {
+                            for await (const subEntry of entry.values()) {
+                                if (subEntry.kind === 'file') {
+                                    const mtype = getBrowserMediaType(subEntry.name);
+                                    if (mtype) {
+                                        if (mtype === 'image') imgCnt++;
+                                        else if (mtype === 'video') vidCnt++;
+                                        else if (mtype === 'audio') audCnt++;
+                                        try {
+                                            const fObj = await subEntry.getFile();
+                                            totalBytes += fObj.size;
+                                        } catch (e) {}
+                                    }
+                                }
+                            }
+                        } catch (subErr) {
+                            console.warn('Error scanning sub-folder in browser mode:', subErr);
+                        }
+
+                        categories.push({
+                            name: entry.name,
+                            path: entry.name,
+                            dirHandle: entry,
+                            image_count: imgCnt,
+                            video_count: vidCnt,
+                            audio_count: audCnt,
+                            total_files: imgCnt + vidCnt + audCnt,
+                            formatted_size: formatBytes(totalBytes)
+                        });
+                    }
+                }
+
+                categories.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                state.categories = categories;
+                renderCategoryTiles();
+                return;
+            } catch (err) {
+                console.error('Browser local categories fetch error:', err);
+            }
+        }
+
+        // BACKEND MODE: If server backend is available
         try {
             const res = await fetch('/api/categories', {
                 method: 'POST',
@@ -780,8 +829,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateTargetBaseUI() {
         if (elements.targetBasePathDisplay) {
-            elements.targetBasePathDisplay.textContent = state.targetBasePath || 'Not Configured';
-            elements.targetBasePathDisplay.title = state.targetBasePath || '';
+            const displayPath = state.browserTargetHandle ? `${state.browserTargetHandle.name} (Local PC)` : (state.targetBasePath || 'Not Configured');
+            elements.targetBasePathDisplay.textContent = displayPath;
+            elements.targetBasePathDisplay.title = state.targetBasePath || displayPath;
         }
     }
 
@@ -949,7 +999,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.mediaTypeBadge.textContent = file.media_type.toUpperCase();
         elements.mediaSizeBadge.textContent = file.formatted_size;
         elements.mediaIndexBadge.textContent = `${index + 1} of ${state.filteredFiles.length}`;
-        elements.btnDeleteMedia.disabled = !!file.fileObject;
+        elements.btnDeleteMedia.disabled = !!file.fileObject && !state.browserFolderHandle;
 
         elements.viewerEmptyState.hidden = true;
         elements.imageViewerMode.hidden = true;
@@ -1038,6 +1088,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.activeFileIndex === -1) return;
         const activeFile = state.filteredFiles[state.activeFileIndex];
 
+        // BROWSER MODE: Delete entry directly from local PC directory handle
+        if (activeFile.fileObject && state.browserFolderHandle) {
+            try {
+                const relativeName = activeFile.id.split('/').pop() || activeFile.name;
+                await state.browserFolderHandle.removeEntry(relativeName);
+                showToast(`Deleted "${activeFile.name}" from local folder`, 'info');
+                const deletedIndex = state.activeFileIndex;
+                const direction = state.reviewDirection || 'right';
+                state.selectedFileIds.delete(activeFile.id);
+                state.files = state.files.filter(f => f.id !== activeFile.id);
+                hideModal(elements.deleteConfirmModal);
+                applyFilters();
+                if (state.filteredFiles.length > 0) {
+                    let nextIndex = direction === 'left' ? deletedIndex - 1 : deletedIndex;
+                    if (nextIndex < 0) nextIndex = 0;
+                    if (nextIndex >= state.filteredFiles.length) nextIndex = state.filteredFiles.length - 1;
+                    selectMediaIndex(nextIndex);
+                } else {
+                    clearMediaViewer();
+                }
+                return;
+            } catch (err) {
+                console.error('Local file delete error:', err);
+                showToast(`Unable to delete local file: ${err.message}`, 'error');
+                return;
+            }
+        }
+
+        // BACKEND MODE: Delete file via server API
         try {
             const res = await fetch('/api/delete-file', {
                 method: 'POST',
@@ -1098,7 +1177,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // PLACEHOLDER: No base target configured
-        if (!state.targetBasePath) {
+        if (!state.targetBasePath && !state.browserTargetHandle) {
             grid.innerHTML = `
                 <div class="empty-category-notice">
                     <div class="empty-graphic">
@@ -1157,7 +1236,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tile.addEventListener('click', () => {
                 if (state.activeFileIndex !== -1) {
-                    categorizeFile(state.filteredFiles[state.activeFileIndex].path, cat.path);
+                    const activeFile = state.filteredFiles[state.activeFileIndex];
+                    categorizeFile(activeFile.path || activeFile.id, cat.path || cat.name);
                 }
             });
 
@@ -1167,21 +1247,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 tile.classList.remove('drag-over');
                 const filePath = e.dataTransfer.getData('text/plain') || state.draggedFilePath;
-                if (filePath) categorizeFile(filePath, cat.path);
+                if (filePath) categorizeFile(filePath, cat.path || cat.name);
             });
 
             grid.appendChild(tile);
         });
     }
 
-    async function categorizeFile(sourcePath, categoryPath) {
+    async function categorizeFile(sourcePath, categoryPathOrName) {
+        const fileToMove = state.files.find(f => f.path === sourcePath || f.id === sourcePath);
+        if (!fileToMove) return;
+
+        const categoryName = (categoryPathOrName || '').split(/[/\\]/).pop();
+
+        // BROWSER MODE: Perform file write & move directly on local PC using directory handle
+        if (state.browserTargetHandle && fileToMove.fileObject) {
+            try {
+                // Get or create category subdirectory handle on local PC
+                const catDirHandle = await state.browserTargetHandle.getDirectoryHandle(categoryName, { create: true });
+
+                // Create and write file in category directory on local PC
+                const newFileHandle = await catDirHandle.getFileHandle(fileToMove.name, { create: true });
+                const writable = await newFileHandle.createWritable();
+                await writable.write(fileToMove.fileObject);
+                await writable.close();
+
+                // If source directory handle supports entry deletion, remove from source folder
+                if (state.browserFolderHandle && typeof state.browserFolderHandle.removeEntry === 'function') {
+                    try {
+                        const relativeName = fileToMove.id.split('/').pop() || fileToMove.name;
+                        await state.browserFolderHandle.removeEntry(relativeName);
+                    } catch (remErr) {
+                        console.warn('Could not remove original file from source handle:', remErr);
+                    }
+                }
+
+                showToast(`Moved "${fileToMove.name}" to category "${categoryName}" on your PC`, 'success');
+
+                state.selectedFileIds.delete(fileToMove.id);
+                state.files = state.files.filter(f => f.id !== fileToMove.id && f.path !== fileToMove.path);
+                applyFilters();
+                await fetchCategories();
+
+                if (state.filteredFiles.length > 0) {
+                    const nextIndex = Math.min(state.activeFileIndex, state.filteredFiles.length - 1);
+                    selectMediaIndex(nextIndex);
+                } else {
+                    clearMediaViewer();
+                }
+                return;
+            } catch (err) {
+                console.error('Local PC file move error:', err);
+                showToast(`Failed to categorize file on local PC: ${err.message}`, 'error');
+                return;
+            }
+        }
+
+        // BACKEND MODE: Move file via server API
         try {
-            const movedFileId = state.files.find(f => f.path === sourcePath)?.id;
+            const movedFileId = fileToMove.id;
 
             const res = await fetch('/api/categorize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source_path: sourcePath, category_path: categoryPath, action: 'move' })
+                body: JSON.stringify({ source_path: sourcePath, category_path: categoryPathOrName, action: 'move' })
             });
             const data = await res.json();
 
@@ -1211,21 +1340,41 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleCreateCategory() {
         const catName = elements.newCategoryNameInput.value.trim();
         if (!catName) { showToast('Category name cannot be empty.', 'error'); return; }
-        if (!state.targetBasePath) {
+
+        if (!state.targetBasePath && !state.browserTargetHandle) {
             showToast('Configure Target Base Directory first.', 'error');
-            openTargetBaseModal();
+            browseTargetFolder();
             return;
         }
 
+        const cleanName = catName.replace(/[/\\?%*:|"<>]/g, '').trim();
+        if (!cleanName) { showToast('Invalid category name.', 'error'); return; }
+
+        // BROWSER MODE: Create category directory directly on local PC
+        if (state.browserTargetHandle) {
+            try {
+                await state.browserTargetHandle.getDirectoryHandle(cleanName, { create: true });
+                showToast(`Created category folder "${cleanName}" on your PC`, 'success');
+                hideModal(elements.createCategoryModal);
+                await fetchCategories();
+                return;
+            } catch (err) {
+                console.error('Local PC category creation error:', err);
+                showToast(`Failed to create category on local PC: ${err.message}`, 'error');
+                return;
+            }
+        }
+
+        // BACKEND MODE: Create category directory via server API
         try {
             const res = await fetch('/api/create-category', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ parent_folder: state.targetBasePath, category_name: catName })
+                body: JSON.stringify({ parent_folder: state.targetBasePath, category_name: cleanName })
             });
             const data = await res.json();
             if (data.success) {
-                showToast(`Created category "${catName}"`, 'success');
+                showToast(`Created category "${cleanName}"`, 'success');
                 hideModal(elements.createCategoryModal);
                 fetchCategories();
             } else {
@@ -1250,8 +1399,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const canvas = document.getElementById('viewerCanvasWrapper');
         canvas?.addEventListener('dragstart', (e) => {
             if (state.activeFileIndex !== -1) {
-                e.dataTransfer.setData('text/plain', state.filteredFiles[state.activeFileIndex].path);
-                state.draggedFilePath = state.filteredFiles[state.activeFileIndex].path;
+                const activeFile = state.filteredFiles[state.activeFileIndex];
+                const dragId = activeFile.path || activeFile.id;
+                e.dataTransfer.setData('text/plain', dragId);
+                state.draggedFilePath = dragId;
             }
         });
         canvas?.addEventListener('dragend', () => { state.draggedFilePath = null; });
@@ -1269,8 +1420,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (e.key >= '1' && e.key <= '9') {
             const idx = parseInt(e.key) - 1;
-            if (idx < state.categories.length && state.activeFileIndex !== -1)
-                categorizeFile(state.filteredFiles[state.activeFileIndex].path, state.categories[idx].path);
+            if (idx < state.categories.length && state.activeFileIndex !== -1) {
+                const activeFile = state.filteredFiles[state.activeFileIndex];
+                categorizeFile(activeFile.path || activeFile.id, state.categories[idx].path || state.categories[idx].name);
+            }
         } else if (e.key === 'Delete') { e.preventDefault(); handleDeleteMediaClick(); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); state.reviewDirection = 'left'; navigatePrevMedia(); }
         else if (e.key === 'ArrowRight') { e.preventDefault(); state.reviewDirection = 'right'; navigateNextMedia(); }

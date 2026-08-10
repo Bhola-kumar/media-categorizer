@@ -192,9 +192,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2. Native browser directory picker API (for modern web browsers e.g. Chrome/Edge)
             if (window.showDirectoryPicker) {
                 try {
-                    const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+                    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
                     state.browserFolderHandle = dirHandle;
-                    state.browserTargetHandle = null;
                     state.browserScanMode = true;
                     if (elements.folderPathInput) {
                         elements.folderPathInput.value = dirHandle.name;
@@ -1255,8 +1254,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function categorizeFile(sourcePath, categoryPathOrName) {
-        const fileToMove = state.files.find(f => f.path === sourcePath || f.id === sourcePath);
-        if (!fileToMove) return;
+        const fileToMove = state.files.find(f => f.path === sourcePath || f.id === sourcePath || f.name === sourcePath);
+        if (!fileToMove) {
+            showToast('Could not find the file to categorize. Try selecting it again.', 'error');
+            console.error('categorizeFile: file not found for sourcePath=', sourcePath);
+            return;
+        }
 
         const categoryName = (categoryPathOrName || '').split(/[/\\]/).pop();
 
@@ -1269,7 +1272,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Create and write file in category directory on local PC
                 const newFileHandle = await catDirHandle.getFileHandle(fileToMove.name, { create: true });
                 const writable = await newFileHandle.createWritable();
-                await writable.write(fileToMove.fileObject);
+                // Read file data as ArrayBuffer to ensure reliable transfer
+                const fileData = await fileToMove.fileObject.arrayBuffer();
+                await writable.write(fileData);
                 await writable.close();
 
                 // If source directory handle supports entry deletion, remove from source folder

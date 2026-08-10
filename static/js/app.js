@@ -184,27 +184,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 // We cannot obtain an absolute filesystem path in browsers for security reasons.
                 elements.folderPathInput.value = `Local: ${dirHandle.name}`;
                 state.folderHandle = dirHandle;
-                showToast('Local folder selected in browser. Note: deployed server cannot access local files. Run the app locally to scan and manage files.', 'info');
+                // Open the manual folder modal so user can paste the full absolute path if they want the server to scan it.
+                showModal(elements.folderPickerModal);
+                if (elements.folderPathInput) {
+                    elements.folderPathInput.select();
+                    elements.folderPathInput.focus();
+                }
+                showToast('Local folder selected in browser. To let the server scan this folder, paste the full path into the dialog and click Scan Folder. Otherwise use client-side preview.', 'info');
                 return;
             }
 
-            // Fallback: use input webkitdirectory to allow the user to pick a local folder (reads files client-side)
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.webkitdirectory = true; // supported in Chromium-based browsers
-            input.multiple = true;
-            input.style.display = 'none';
-            document.body.appendChild(input);
-            input.addEventListener('change', (ev) => {
-                const files = Array.from(ev.target.files || []);
-                if (files.length > 0) {
-                    elements.folderPathInput.value = `Local: ${files[0].webkitRelativePath.split('/')[0]}`;
-                    state.pendingFolderFiles = files;
-                    showToast('Local folder selected via file input. Run the app locally to scan/manage files or use upload workflows.', 'info');
-                }
-                input.remove();
-            });
-            input.click();
+            // Fallback: the browser doesn't support directory handles. Show the manual folder modal
+            // and ask the user to paste the full path from their OS. Creating a hidden file input
+            // causes some browsers to show "upload" wording which is confusing — avoid that.
+            showModal(elements.folderPickerModal);
+            showToast('Your browser cannot provide a folder handle. Please paste the full folder path into the dialog and click Scan Folder.', 'info');
         } catch (err) {
             console.warn('Browser folder picker error:', err);
             showToast('Folder picker is unavailable in this browser. Please run the app locally for full filesystem access.', 'error');
@@ -236,26 +230,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dirHandle = await window.showDirectoryPicker();
                 elements.targetBasePathInput.value = `Local: ${dirHandle.name}`;
                 state.targetBaseHandle = dirHandle;
-                showToast('Local target base selected in browser. Note: deployed server cannot access local files. Run the app locally to configure target base.', 'info');
+                // Open the target base modal so user can paste the full absolute path for server-side use.
+                showModal(elements.targetBaseModal);
+                if (elements.targetBasePathInput) {
+                    elements.targetBasePathInput.select();
+                    elements.targetBasePathInput.focus();
+                }
+                showToast('Local target base selected in browser. To let the server configure categories here, paste the full path into the dialog and confirm.', 'info');
                 return;
             }
 
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.webkitdirectory = true;
-            input.multiple = true;
-            input.style.display = 'none';
-            document.body.appendChild(input);
-            input.addEventListener('change', (ev) => {
-                const files = Array.from(ev.target.files || []);
-                if (files.length > 0) {
-                    elements.targetBasePathInput.value = `Local: ${files[0].webkitRelativePath.split('/')[0]}`;
-                    state.pendingTargetFiles = files;
-                    showToast('Local target base selected via file input. Run the app locally to configure target base.', 'info');
-                }
-                input.remove();
-            });
-            input.click();
+            // Fallback: the browser doesn't support directory handles. Show the manual target base modal
+            // and ask the user to paste the full path from their OS. Avoid creating hidden file inputs
+            // which can show upload wording in the browser UI.
+            showModal(elements.targetBaseModal);
+            showToast('Your browser cannot provide a folder handle. Please paste the full target base path into the dialog and confirm.', 'info');
         } catch (err) {
             console.warn('Browser folder picker error:', err);
             showToast('Folder picker is unavailable in this browser. Please run the app locally for full filesystem access.', 'error');

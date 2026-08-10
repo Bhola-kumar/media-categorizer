@@ -845,7 +845,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.searchQuery && !file.name.toLowerCase().includes(state.searchQuery)) return false;
             return true;
         });
-        elements.fileCountPill.textContent = state.filteredFiles.length;
+
+        // Compute real-time queue & filter count indicators
+        updateCategoryCounts();
 
         if (state.selectionMode === 'auto') {
             state.selectedFileIds.clear();
@@ -911,8 +913,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             row.addEventListener('click', () => selectMediaIndex(index));
             row.addEventListener('dragstart', (e) => {
-                e.dataTransfer.setData('text/plain', file.path);
-                state.draggedFilePath = file.path;
+                const dragId = file.path || file.id;
+                e.dataTransfer.setData('text/plain', dragId);
+                state.draggedFilePath = dragId;
                 row.style.opacity = '0.5';
             });
             row.addEventListener('dragend', () => { row.style.opacity = '1'; state.draggedFilePath = null; });
@@ -928,12 +931,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function updateCategoryCounts(summary) {
-        if (!summary) return;
-        document.getElementById('cntAll').textContent = summary.total_count || 0;
-        document.getElementById('cntImage').textContent = summary.image_count || 0;
-        document.getElementById('cntVideo').textContent = summary.video_count || 0;
-        document.getElementById('cntAudio').textContent = summary.audio_count || 0;
+    function updateCategoryCounts(summary = null) {
+        let total = 0, imgCnt = 0, vidCnt = 0, audCnt = 0;
+        if (summary) {
+            total = summary.total_count || 0;
+            imgCnt = summary.image_count || 0;
+            vidCnt = summary.video_count || 0;
+            audCnt = summary.audio_count || 0;
+        } else {
+            total = state.files.length;
+            imgCnt = state.files.filter(f => f.media_type === 'image').length;
+            vidCnt = state.files.filter(f => f.media_type === 'video').length;
+            audCnt = state.files.filter(f => f.media_type === 'audio').length;
+        }
+
+        const cntAll = document.getElementById('cntAll');
+        const cntImage = document.getElementById('cntImage');
+        const cntVideo = document.getElementById('cntVideo');
+        const cntAudio = document.getElementById('cntAudio');
+
+        if (cntAll) cntAll.textContent = total;
+        if (cntImage) cntImage.textContent = imgCnt;
+        if (cntVideo) cntVideo.textContent = vidCnt;
+        if (cntAudio) cntAudio.textContent = audCnt;
+
+        if (elements.fileCountPill) {
+            elements.fileCountPill.textContent = state.filteredFiles ? state.filteredFiles.length : 0;
+        }
     }
 
     function updateSelectionUI() {

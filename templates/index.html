@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Categorizer Pro - Studio</title>
+    <!-- Google Fonts: Outfit & Plus Jakarta Sans & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="light-theme">
+
+    <!-- Native folder selection is handled by the backend dialog helper -->
+
+    <div class="app-container">
+        
+        <!-- TOP HEADER BAR -->
+        <header class="app-header">
+            <div class="brand-area">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-folder-open"></i>
+                </div>
+                <div class="brand-title">
+                    <h1>Media Categorizer <span class="badge-pro">PRO</span></h1>
+                    <p class="tagline">Media Organizer & Review Studio</p>
+                </div>
+            </div>
+
+            <div class="header-center-path">
+                <div class="active-path-badge" id="activePathDisplay" title="Current folder being scanned">
+                    <i class="fa-regular fa-folder"></i>
+                    <span id="currentFolderPath">No folder opened</span>
+                </div>
+                <button class="btn btn-primary" id="btnBrowseFolder">
+                    <i class="fa-solid fa-folder-plus"></i> Open Local Folder
+                </button>
+            </div>
+
+            <div class="header-actions">
+                <button class="btn btn-icon" id="btnThemeToggle" title="Toggle Light / Dark Theme">
+                    <i class="fa-solid fa-sun"></i> <span id="themeToggleText">Light</span>
+                </button>
+                <button class="btn btn-icon" id="btnUndo" disabled title="Undo last action (Ctrl+Z)">
+                    <i class="fa-solid fa-rotate-left"></i> Undo
+                </button>
+                <button class="btn btn-icon" id="btnHotkeysHelp" title="Keyboard Shortcuts Guide">
+                    <i class="fa-solid fa-keyboard"></i> Hotkeys
+                </button>
+                <button class="btn btn-icon" id="btnToggleDeleteConfirm" title="Toggle delete confirmation prompt">
+                    <i class="fa-solid fa-trash"></i> <span id="deleteConfirmToggleText">Ask before delete</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN WORKSPACE SPLIT -->
+        <main class="app-workspace">
+            
+            <!-- LEFT DYNAMIC SIDEBAR -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-title">
+                        <i class="fa-solid fa-list-check"></i>
+                        <span>Media Queue</span>
+                        <span class="file-count-pill" id="fileCountPill">0</span>
+                    </div>
+                </div>
+
+                <!-- FILTER & SEARCH PANEL -->
+                <div class="sidebar-filter-panel">
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="searchInput" placeholder="Search files by name...">
+                        <button id="btnClearSearch" class="btn-clear-text" hidden><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+
+                    <div class="filter-pills">
+                        <button class="filter-pill active" data-type="all">
+                            <span>All</span> <small id="cntAll">0</small>
+                        </button>
+                        <button class="filter-pill pill-image" data-type="image">
+                            <i class="fa-regular fa-image"></i> <span>Images</span> <small id="cntImage">0</small>
+                        </button>
+                        <button class="filter-pill pill-video" data-type="video">
+                            <i class="fa-solid fa-film"></i> <span>Videos</span> <small id="cntVideo">0</small>
+                        </button>
+                        <button class="filter-pill pill-audio" data-type="audio">
+                            <i class="fa-solid fa-music"></i> <span>Audio</span> <small id="cntAudio">0</small>
+                        </button>
+                    </div>
+
+                    <div class="sidebar-batch-bar">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="selectAllCheckbox">
+                            <span class="checkmark"></span>
+                            <span class="label-text">Select All</span>
+                        </label>
+                        <div class="batch-action-trigger" id="batchActionMenu" hidden>
+                            <span id="selectedCountBadge">0 selected</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LINE-BY-LINE FILE LIST -->
+                <div class="sidebar-file-list" id="fileListContainer">
+                    <div class="empty-sidebar-state">
+                        <i class="fa-solid fa-folder-open empty-icon"></i>
+                        <p>No folder opened</p>
+                        <small>Click <strong>Open Local Folder</strong> to review files line-by-line.</small>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- RESIZER HANDLE FOR SIDEBAR -->
+            <div class="sidebar-resizer" id="sidebarResizer"></div>
+
+            <!-- RIGHT SPLIT CONTENT -->
+            <div class="content-split-container">
+                
+                <!-- UPPER HALF: MEDIA VIEWER & PLAYER CANVAS -->
+                <section class="upper-pane" id="upperPane">
+                    <div class="pane-header">
+                        <div class="media-meta-info">
+                            <h2 id="mediaTitle">Select a File from Left Queue to Review</h2>
+                            <div class="media-badges" id="mediaBadges">
+                                <span class="badge badge-type" id="mediaTypeBadge">None</span>
+                                <span class="badge badge-size" id="mediaSizeBadge">-</span>
+                                <span class="badge badge-index" id="mediaIndexBadge">0 of 0</span>
+                            </div>
+                        </div>
+
+                        <div class="media-player-nav">
+                            <button class="btn btn-danger btn-sm" id="btnDeleteMedia" disabled title="Delete current media file (Del)">
+                                <i class="fa-solid fa-trash"></i> Delete
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btnPrevMedia" title="Previous File (Left Arrow)">
+                                <i class="fa-solid fa-chevron-left"></i> Prev
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btnNextMedia" title="Next File (Right Arrow)">
+                                Next <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btnFullScreenMedia" title="Toggle full screen view">
+                                <i class="fa-solid fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="viewer-canvas-wrapper" id="viewerCanvasWrapper">
+                        
+                        <!-- Empty State -->
+                        <div class="viewer-empty-state" id="viewerEmptyState">
+                            <div class="empty-graphic">
+                                <i class="fa-solid fa-photo-film"></i>
+                            </div>
+                            <h3>Media Inspection Canvas</h3>
+                            <p>Select any item from the left queue to preview, inspect, or organize into categories below.</p>
+                        </div>
+
+                        <!-- Image Viewer Mode -->
+                        <div class="viewer-mode viewer-image-mode" id="imageViewerMode" hidden>
+                            <div class="image-controls-bar">
+                                <button class="tool-btn" id="btnZoomIn" title="Zoom In"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+                                <button class="tool-btn" id="btnZoomOut" title="Zoom Out"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+                                <button class="tool-btn" id="btnZoomReset" title="Reset Zoom"><i class="fa-solid fa-compress"></i></button>
+                                <button class="tool-btn" id="btnRotateLeft" title="Rotate Counter-Clockwise"><i class="fa-solid fa-rotate-left"></i></button>
+                                <button class="tool-btn" id="btnRotateRight" title="Rotate Clockwise"><i class="fa-solid fa-rotate-right"></i></button>
+                            </div>
+                            <div class="image-container" id="imageContainer" draggable="true">
+                                <img id="activeImageViewer" src="" alt="Media Preview">
+                            </div>
+                        </div>
+
+                        <!-- Video Player Mode -->
+                        <div class="viewer-mode viewer-video-mode" id="videoViewerMode" hidden>
+                            <div class="video-wrapper">
+                                <video id="activeVideoPlayer" controls preload="metadata"></video>
+                            </div>
+                        </div>
+
+                        <!-- Audio Player Mode -->
+                        <div class="viewer-mode viewer-audio-mode" id="audioViewerMode" hidden>
+                            <div class="audio-card">
+                                <div class="audio-disc-wrapper">
+                                    <div class="audio-disc" id="audioDisc">
+                                        <i class="fa-solid fa-music"></i>
+                                    </div>
+                                    <div class="waveform-animation" id="waveformAnim">
+                                        <span></span><span></span><span></span><span></span><span></span>
+                                    </div>
+                                </div>
+                                <div class="audio-info">
+                                    <h3 id="audioFileName">Audio Track</h3>
+                                    <p id="audioFileMeta">Audio File</p>
+                                </div>
+                                <div class="audio-player-custom">
+                                    <audio id="activeAudioPlayer" controls></audio>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Drag Indicator Overlay -->
+                        <div class="drag-hint-pill" id="dragHintPill">
+                            <i class="fa-solid fa-hand-pointer"></i> Drag item down to a Category Tile
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SPLIT RESIZER BETWEEN UPPER AND LOWER PANES -->
+                <div class="pane-vertical-resizer" id="paneVerticalResizer"></div>
+
+                <!-- LOWER HALF: CATEGORY TILES & HORIZONTAL SCROLL DROP ZONE -->
+                <section class="lower-pane" id="lowerPane">
+                    <div class="category-section-header">
+                        <div class="header-left">
+                            <div class="section-title">
+                                <i class="fa-solid fa-folder-tree"></i>
+                                <span>Category Target Folders</span>
+                                <small id="categoryCountBadge">(0 categories)</small>
+                            </div>
+
+                            <!-- Target Base Folder Location Selector Badge -->
+                            <div class="target-base-badge" id="targetBaseBadge" title="Click to configure base destination folder for category creation">
+                                <i class="fa-solid fa-location-dot"></i>
+                                <span>Base Target: </span>
+                                <strong id="targetBasePathDisplay">Not Configured</strong>
+                                <button class="btn-link-icon" id="btnChangeTargetBase" title="Configure Base Target Folder"><i class="fa-solid fa-pen-to-square"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="header-right">
+                            <div class="carousel-nav-btns">
+                                <button class="btn btn-icon btn-sm" id="btnScrollCategoriesLeft" title="Scroll Left">
+                                    <i class="fa-solid fa-chevron-left"></i>
+                                </button>
+                                <button class="btn btn-icon btn-sm" id="btnScrollCategoriesRight" title="Scroll Right">
+                                    <i class="fa-solid fa-chevron-right"></i>
+                                </button>
+                            </div>
+                            <button class="btn btn-primary btn-sm" id="btnCreateCategory">
+                                <i class="fa-solid fa-plus"></i> New Category
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- CATEGORY TILES HORIZONTAL SCROLL CAROUSEL TRACK -->
+                    <div class="category-scroll-container" id="categoryScrollContainer">
+                        <div class="category-tiles-track" id="categoryTilesGrid">
+                            <!-- Category tiles rendered dynamically here -->
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+
+        </main>
+    </div>
+
+    <!-- MODAL: BROWSE FOLDER MANUAL INPUT / DIALOG -->
+    <div class="modal-overlay" id="folderPickerModal" hidden>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-folder-open"></i> Select Local Folder to Scan</h3>
+                <button class="btn-close" id="btnCloseFolderModal" aria-label="Close modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>Choose a source folder on your computer containing images, videos, or audio files to review:</p>
+                
+                <div class="form-group">
+                    <label for="folderPathInput">Local Folder Path:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="folderPathInput" placeholder="Click 'Browse OS' or paste path e.g. D:\Photos">
+                        <button class="btn btn-secondary" id="btnBrowseSourceOs" title="Browse OS File Explorer Dialog">
+                            <i class="fa-regular fa-folder-open"></i> Browse OS
+                        </button>
+                    </div>
+                    <small class="path-hint-text" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                        <i class="fa-solid fa-lightbulb"></i> Tip: Copy the full path from Windows File Explorer address bar & paste here if needed.
+                    </small>
+                </div>
+
+                <div class="quick-folders-section">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text-main);">Quick Select Location:</label>
+                    <div class="path-suggestions" id="sourceQuickFolders" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                        <!-- System folder chips rendered here dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btnCancelFolderModal">Cancel</button>
+                <button class="btn btn-primary" id="btnConfirmFolderModal"><i class="fa-solid fa-check"></i> Scan Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: CONFIGURE TARGET BASE LOCATION -->
+    <div class="modal-overlay" id="targetBaseModal" hidden>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-location-dot"></i> Configure Target Base Directory</h3>
+                <button class="btn-close" id="btnCloseTargetBaseModal" aria-label="Close modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Required:</strong> Specify the folder location on your computer where all category directories will be created:</p>
+                <div class="form-group">
+                    <label for="targetBasePathInput">Target Base Folder Path:</label>
+                    <div class="input-with-btn">
+                        <input type="text" id="targetBasePathInput" placeholder="Click 'Browse OS' or paste path e.g. D:\Organized_Media">
+                        <button class="btn btn-secondary" id="btnBrowseTargetOs" title="Browse OS File Explorer Dialog">
+                            <i class="fa-regular fa-folder-open"></i> Browse OS
+                        </button>
+                    </div>
+                    <small class="path-hint-text" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                        <i class="fa-solid fa-lightbulb"></i> Tip: Copy the full path from Windows File Explorer address bar & paste here.
+                    </small>
+                </div>
+
+                <div class="quick-folders-section">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text-main);">Quick Select Base Location:</label>
+                    <div class="path-suggestions" id="targetQuickFolders" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+                        <!-- System folder chips rendered here dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btnCancelTargetBaseModal">Cancel</button>
+                <button class="btn btn-primary" id="btnConfirmTargetBaseModal"><i class="fa-solid fa-check"></i> Confirm Base Directory</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: CREATE CATEGORY -->
+    <div class="modal-overlay" id="createCategoryModal" hidden>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-folder-plus"></i> Create New Category Folder</h3>
+                <button class="btn-close" id="btnCloseCategoryModal" aria-label="Close modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="newCategoryNameInput">Category Folder Name:</label>
+                    <input type="text" id="newCategoryNameInput" placeholder="e.g. Travel 2026, Favorites, Archive, Action Clips">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btnCancelCategoryModal">Cancel</button>
+                <button class="btn btn-primary" id="btnConfirmCategoryModal"><i class="fa-solid fa-plus"></i> Create Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: DELETE CONFIRMATION -->
+    <div class="modal-overlay" id="deleteConfirmModal" hidden>
+        <div class="modal-card modal-small">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-trash"></i> Confirm Delete</h3>
+                <button class="btn-close" id="btnCloseDeleteModal" aria-label="Close modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p id="deleteConfirmText">Are you sure you want to delete this file?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btnCancelDeleteModal">Cancel</button>
+                <button class="btn btn-danger" id="btnConfirmDeleteModal"><i class="fa-solid fa-trash"></i> Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: HOTKEYS HELP -->
+    <div class="modal-overlay" id="hotkeysModal" hidden>
+        <div class="modal-card modal-medium">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-keyboard"></i> Keyboard Shortcuts Guide</h3>
+                <button class="btn-close" id="btnCloseHotkeysModal" aria-label="Close modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="hotkeys-grid">
+                    <div class="hotkey-item"><kbd>1</kbd> - <kbd>9</kbd> <span>Categorize active file to Category Tile #1 to #9</span></div>
+                    <div class="hotkey-item"><kbd>&larr;</kbd> / <kbd>&rarr;</kbd> <span>Navigate Previous / Next file in queue</span></div>
+                    <div class="hotkey-item"><kbd>Space</kbd> <span>Play / Pause active video or audio</span></div>
+                    <div class="hotkey-item"><kbd>Del</kbd> <span>Delete current active file while reviewing</span></div>
+                    <div class="hotkey-item"><kbd>Ctrl</kbd> + <kbd>Z</kbd> <span>Undo last file categorization or delete move</span></div>
+                    <div class="hotkey-item"><kbd>R</kbd> <span>Rotate active image</span></div>
+                    <div class="hotkey-item"><kbd>Esc</kbd> <span>Close open modal dialogs</span></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="btnCloseHotkeysModalBtn">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION STACK -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

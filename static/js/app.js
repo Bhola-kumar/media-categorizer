@@ -828,9 +828,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateTargetBaseUI() {
         if (elements.targetBasePathDisplay) {
-            const displayPath = state.browserTargetHandle ? `${state.browserTargetHandle.name} (Local PC)` : (state.targetBasePath || 'Not Configured');
+            let displayPath = 'Not Configured';
+            if (state.browserTargetHandle) {
+                displayPath = `${state.browserTargetHandle.name} (Local PC)`;
+            } else if (state.backendEnabled && state.targetBasePath) {
+                displayPath = state.targetBasePath;
+            }
             elements.targetBasePathDisplay.textContent = displayPath;
-            elements.targetBasePathDisplay.title = state.targetBasePath || displayPath;
+            elements.targetBasePathDisplay.title = displayPath;
         }
     }
 
@@ -1199,19 +1204,22 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.categoryCountBadge.textContent = `(${state.categories.length} categories)`;
         }
 
+        const isConfigured = state.browserTargetHandle || (state.backendEnabled && state.targetBasePath);
+
         // PLACEHOLDER: No base target configured
-        if (!state.targetBasePath && !state.browserTargetHandle) {
+        if (!isConfigured) {
             grid.innerHTML = `
                 <div class="empty-category-notice">
                     <div class="empty-graphic">
                         <i class="fa-solid fa-location-dot"></i>
                     </div>
                     <h3>Target Base Directory Not Configured</h3>
-                    <p>Set a base folder location where all your category sub-folders will be created.</p>
-                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('targetBaseBadge').click()">
+                    <p>Select a base folder location on your computer where all your category sub-folders will be created.</p>
+                    <button class="btn btn-primary btn-sm" id="btnConfigureTargetBaseNotice">
                         <i class="fa-solid fa-gear"></i> Configure Target Base Directory
                     </button>
                 </div>`;
+            document.getElementById('btnConfigureTargetBaseNotice')?.addEventListener('click', browseTargetFolder);
             return;
         }
 

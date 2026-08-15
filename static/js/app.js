@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         activeObjectUrl: null,
         backendEnabled: location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:',
         isBrowsing: false, // debounce lock for browse buttons
+        isLoadingFolder: false,
         undoStack: []
     };
 
@@ -117,7 +118,9 @@ document.addEventListener('DOMContentLoaded', () => {
         hotkeysModal: document.getElementById('hotkeysModal'),
         btnCloseHotkeysModal: document.getElementById('btnCloseHotkeysModal'),
         btnCloseHotkeysModalBtn: document.getElementById('btnCloseHotkeysModalBtn'),
-        toastContainer: document.getElementById('toastContainer')
+        toastContainer: document.getElementById('toastContainer'),
+        loadingOverlay: document.getElementById('loadingOverlay'),
+        loadingText: document.getElementById('loadingText')
     };
 
     // ==========================================
@@ -164,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function browseSourceFolder() {
         if (state.isBrowsing) return;
         state.isBrowsing = true;
+        showFolderLoading('Opening folder selector...');
         try {
             // 1. Backend native folder picker (when running with Python/Flask backend locally)
             if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
@@ -601,6 +605,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        showFolderLoading('Scanning folder contents...');
+
         const scanButton = elements.btnConfirmFolderModal;
         const originalButtonText = scanButton?.textContent;
         if (scanButton) {
@@ -659,10 +665,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 scanButton.disabled = false;
                 scanButton.textContent = originalButtonText || 'Scan Folder';
             }
+            hideFolderLoading();
         }
     }
 
     async function scanBrowserFolder(dirHandle) {
+        showFolderLoading('Scanning folder contents...');
         const files = [];
         const rootName = dirHandle.name;
 
@@ -733,6 +741,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.error('Browser folder scan failed:', err);
             showToast('Failed to scan folder in browser.', 'error');
+        } finally {
+            hideFolderLoading();
         }
     }
 
@@ -1717,6 +1727,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!modal) return;
         modal.hidden = true;
         modal.style.display = 'none';
+    }
+
+    function showFolderLoading(message = 'Loading...') {
+        state.isLoadingFolder = true;
+        if (elements.loadingOverlay) {
+            elements.loadingOverlay.hidden = false;
+            elements.loadingText.textContent = message;
+        }
+        if (elements.btnBrowseFolder) {
+            elements.btnBrowseFolder.disabled = true;
+        }
+    }
+
+    function hideFolderLoading() {
+        state.isLoadingFolder = false;
+        if (elements.loadingOverlay) {
+            elements.loadingOverlay.hidden = true;
+        }
+        if (elements.btnBrowseFolder) {
+            elements.btnBrowseFolder.disabled = false;
+        }
     }
 
     function showToast(message, type = 'info') {

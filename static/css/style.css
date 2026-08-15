@@ -1375,7 +1375,53 @@ kbd {
 .toast.error { border-left-color: var(--accent-red); }
 .toast.info { border-left-color: var(--primary); }
 
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.36);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 400;
+}
+
+.loading-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-medium);
+    border-radius: 18px;
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow-lg);
+    min-width: 180px;
+}
+
+.loading-card p {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    text-align: center;
+}
+
+.loading-spinner {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: 3px solid var(--border-medium);
+    border-top-color: var(--primary);
+    animation: spin 0.9s linear infinite;
+}
+
 @keyframes toastIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }

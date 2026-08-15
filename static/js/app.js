@@ -29,7 +29,8 @@ document.addEventListener('DOMContentLoaded', () => {
         browserScanMode: false,
         activeObjectUrl: null,
         backendEnabled: location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:',
-        isBrowsing: false  // debounce lock for browse buttons
+        isBrowsing: false, // debounce lock for browse buttons
+        undoStack: []
     };
 
     // DOM Elements
@@ -631,6 +632,8 @@ document.addEventListener('DOMContentLoaded', () => {
             state.folderName = data.folder_name;
             state.files = data.files || [];
             state.selectedFileIds.clear();
+            state.undoStack = [];
+            if (elements.btnUndo) elements.btnUndo.disabled = true;
             state.activeFileIndex = -1;
             state.selectionMode = 'manual';
             state.searchQuery = '';
@@ -703,6 +706,8 @@ document.addEventListener('DOMContentLoaded', () => {
             state.folderName = rootName;
             state.files = files;
             state.selectedFileIds.clear();
+            state.undoStack = [];
+            if (elements.btnUndo) elements.btnUndo.disabled = true;
             state.activeFileIndex = -1;
             state.selectionMode = 'manual';
             state.searchQuery = '';
@@ -1121,6 +1126,8 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const relativeName = activeFile.id.split('/').pop() || activeFile.name;
                 await state.browserFolderHandle.removeEntry(relativeName);
+                state.undoStack.push({ type: 'delete', file: activeFile });
+                if (elements.btnUndo) elements.btnUndo.disabled = false;
                 showToast(`Deleted "${activeFile.name}" from local folder`, 'info');
                 const deletedIndex = state.activeFileIndex;
                 const direction = state.reviewDirection || 'right';
@@ -1321,6 +1328,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 showToast(`Moved "${fileToMove.name}" to category "${categoryName}" on your PC`, 'success');
 
+                state.undoStack.push({ type: 'categorize', file: fileToMove, categoryName: categoryName });
+                if (elements.btnUndo) elements.btnUndo.disabled = false;
+
                 state.selectedFileIds.delete(fileToMove.id);
                 state.files = state.files.filter(f => f.id !== fileToMove.id && f.path !== fileToMove.path);
                 applyFilters();
@@ -1421,12 +1431,116 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function handleUndo() {
-        try {
-            const res = await fetch('/api/undo', { method: 'POST' });
-            const data = await res.json();
-            if (data.success) { showToast(data.message, 'info'); scanFolder(state.folderPath); }
-            else { showToast(data.error || 'Undo failed', 'error'); elements.btnUndo.disabled = true; }
-        } catch (err) { console.error(err); }
+        // 1. BROWSER MODE UNDO: Client-side file move & delete restoration
+        if (state.undoStack.length > 0) {
+            const lastOp = state.undoStack.pop();
+            if (elements.btnUndo) elements.btnUndo.disabled = state.undoStack.length === 0;
+
+            if (lastOp.type === 'categorize') {
+                try {
+                    const { file, categoryName } = lastOp;
+
+                    // Remove file from category sub-folder on local PC
+                    if (state.browserTargetHandle) {
+                        try {
+                            const catDirHandle = await state.browserTargetHandle.getDirectoryHandle(categoryName, { create: false });
+                            await catDirHandle.removeEntry(file.name);
+                        } catch (remErr) {
+                            console.warn('Could not remove file from category folder during undo:', remErr);
+                        }
+                    }
+
+                    // Restore file back to source folder on local PC if handle & fileObject are available
+                    if (state.browserFolderHandle && file.fileObject) {
+                        try {
+                            const restoredHandle = await state.browserFolderHandle.getFileHandle(file.name, { create: true });
+                            const writable = await restoredHandle.createWritable();
+                            const fileData = await file.fileObject.arrayBuffer();
+                            await writable.write(fileData);
+                            await writable.close();
+                        } catch (writeErr) {
+                            console.warn('Could not write file back to source folder during undo:', writeErr);
+                        }
+                    }
+
+                    // Re-add file to queue state
+                    if (!state.files.some(f => f.id === file.id || f.path === file.path)) {
+                        state.files.push(file);
+                        state.files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                    }
+
+                    showToast(`Undid move of "${file.name}"`, 'success');
+                    applyFilters();
+                    await fetchCategories();
+
+                    const restoredIndex = state.filteredFiles.findIndex(f => f.id === file.id || f.path === file.path);
+                    if (restoredIndex >= 0) selectMediaIndex(restoredIndex);
+                    return;
+                } catch (err) {
+                    console.error('Browser mode undo error:', err);
+                    showToast(`Failed to undo move: ${err.message}`, 'error');
+                    return;
+                }
+            } else if (lastOp.type === 'delete') {
+                try {
+                    const { file } = lastOp;
+
+                    // Write file back to source directory on local PC
+                    if (state.browserFolderHandle && file.fileObject) {
+                        try {
+                            const restoredHandle = await state.browserFolderHandle.getFileHandle(file.name, { create: true });
+                            const writable = await restoredHandle.createWritable();
+                            const fileData = await file.fileObject.arrayBuffer();
+                            await writable.write(fileData);
+                            await writable.close();
+                        } catch (writeErr) {
+                            console.warn('Could not write back deleted file during undo:', writeErr);
+                        }
+                    }
+
+                    // Re-add file to queue state
+                    if (!state.files.some(f => f.id === file.id || f.path === file.path)) {
+                        state.files.push(file);
+                        state.files.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+                    }
+
+                    showToast(`Restored deleted file "${file.name}"`, 'success');
+                    applyFilters();
+
+                    const restoredIndex = state.filteredFiles.findIndex(f => f.id === file.id || f.path === file.path);
+                    if (restoredIndex >= 0) selectMediaIndex(restoredIndex);
+                    return;
+                } catch (err) {
+                    console.error('Browser mode undo delete error:', err);
+                    showToast(`Failed to restore deleted file: ${err.message}`, 'error');
+                    return;
+                }
+            }
+        }
+
+        // 2. BACKEND MODE UNDO: Call server endpoint
+        if (state.backendEnabled) {
+            try {
+                const res = await fetch('/api/undo', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message || 'Action undone', 'info');
+                    if (elements.btnUndo) elements.btnUndo.disabled = !data.undo_available;
+                    await scanFolder(state.folderPath);
+                    await fetchCategories();
+                } else {
+                    showToast(data.error || 'Nothing to undo', 'info');
+                    if (elements.btnUndo) elements.btnUndo.disabled = true;
+                }
+            } catch (err) {
+                console.error('Backend undo error:', err);
+                showToast('Failed to perform undo.', 'error');
+            }
+            return;
+        }
+
+        showToast('Nothing to undo.', 'info');
+        if (elements.btnUndo) elements.btnUndo.disabled = true;
     }
 
     // ==========================================

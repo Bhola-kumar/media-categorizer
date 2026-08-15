@@ -441,7 +441,8 @@ def undo_last_action():
                 return jsonify({
                     'success': True,
                     'message': msg,
-                    'restored_path': src
+                    'restored_path': src,
+                    'undo_available': len(undo_stack) > 0
                 })
         elif action == 'copy':
             dst = last_op['dst']
@@ -449,7 +450,8 @@ def undo_last_action():
                 os.remove(dst)
                 return jsonify({
                     'success': True,
-                    'message': f'Removed copied file {os.path.basename(dst)}'
+                    'message': f'Removed copied file {os.path.basename(dst)}',
+                    'undo_available': len(undo_stack) > 0
                 })
     except Exception as e:
         return jsonify({'error': f'Failed to undo action: {str(e)}'}), 500

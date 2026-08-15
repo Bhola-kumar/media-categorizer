@@ -748,6 +748,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
+    function getBrowserMimeType(filename) {
+        const ext = (filename || '').split('.').pop()?.toLowerCase();
+        if (!ext) return 'video/mp4';
+        const map = {
+            'mp4': 'video/mp4', 'm4v': 'video/mp4', 'mov': 'video/mp4',
+            'webm': 'video/webm', 'ogv': 'video/ogg', 'mkv': 'video/mp4',
+            'avi': 'video/x-msvideo', '3gp': 'video/3gpp',
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+            'gif': 'image/gif', 'webp': 'image/webp',
+            'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'm4a': 'audio/mp4', 'aac': 'audio/aac'
+        };
+        return map[ext] || 'video/mp4';
+    }
+
     function formatBytes(bytes) {
         if (bytes < 1024) return `${bytes} B`;
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -1043,8 +1057,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         revokeActiveObjectUrl();
 
-        const mediaUrl = file.fileObject ? URL.createObjectURL(file.fileObject) : `/api/media?path=${encodeURIComponent(file.path)}`;
+        let mediaUrl = `/api/media?path=${encodeURIComponent(file.path)}`;
         if (file.fileObject) {
+            let typedBlob = file.fileObject;
+            if (!file.fileObject.type || file.fileObject.type === '' || (file.media_type === 'video' && !file.fileObject.type.startsWith('video/'))) {
+                const mime = getBrowserMimeType(file.name);
+                typedBlob = file.fileObject.slice(0, file.fileObject.size, mime);
+            }
+            mediaUrl = URL.createObjectURL(typedBlob);
             state.activeObjectUrl = mediaUrl;
         }
 

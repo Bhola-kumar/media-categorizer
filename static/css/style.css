@@ -760,7 +760,7 @@ input {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 12px;
+    padding: 16px;
     box-sizing: border-box;
     overflow: hidden;
 }
@@ -773,19 +773,20 @@ input {
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
+    box-sizing: border-box;
+    padding: 10px;
 }
 
 .viewer-video-mode video {
-    max-width: 100%;
-    max-height: 100%;
+    max-width: 96%;
+    max-height: 92%;
     width: auto;
     height: auto;
     object-fit: contain;
-    border-radius: 12px;
+    border-radius: 14px;
     box-shadow: var(--shadow-lg);
     outline: none;
-    background: #000;
+    background: #000000;
 }
 
 /* Audio Mode */

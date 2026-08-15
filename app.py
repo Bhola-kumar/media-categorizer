@@ -464,9 +464,31 @@ def stream_media():
     if not file_path or not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
 
-    mime_type, _ = mimetypes.guess_type(file_path)
+    ext = os.path.splitext(file_path)[1].lower()
+    ext_mime_map = {
+        '.mp4': 'video/mp4',
+        '.m4v': 'video/mp4',
+        '.mov': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogv': 'video/ogg',
+        '.mkv': 'video/mp4',
+        '.avi': 'video/x-msvideo',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+
+    mime_type = ext_mime_map.get(ext)
     if not mime_type:
-        mime_type = 'application/octet-stream'
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = 'video/mp4' if ext in VIDEO_EXTENSIONS else 'application/octet-stream'
 
     file_size = os.path.getsize(file_path)
     range_header = request.headers.get('Range', None)

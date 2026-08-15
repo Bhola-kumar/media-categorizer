@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaSizeBadge: document.getElementById('mediaSizeBadge'),
         mediaIndexBadge: document.getElementById('mediaIndexBadge'),
         btnDeleteMedia: document.getElementById('btnDeleteMedia'),
+        btnOpenExternalMedia: document.getElementById('btnOpenExternalMedia'),
         btnPrevMedia: document.getElementById('btnPrevMedia'),
         btnNextMedia: document.getElementById('btnNextMedia'),
         btnToggleDeleteConfirm: document.getElementById('btnToggleDeleteConfirm'),
@@ -167,7 +168,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function browseSourceFolder() {
         if (state.isBrowsing) return;
         state.isBrowsing = true;
-        showFolderLoading('Opening folder selector...');
         try {
             // 1. Backend native folder picker (when running with Python/Flask backend locally)
             if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
@@ -444,6 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ─── Delete, Prev, Next ───
         elements.btnDeleteMedia?.addEventListener('click', handleDeleteMediaClick);
+        elements.btnOpenExternalMedia?.addEventListener('click', openActiveMediaExternally);
         elements.btnPrevMedia?.addEventListener('click', () => {
             state.reviewDirection = 'left';
             navigatePrevMedia();
@@ -1057,6 +1058,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.mediaSizeBadge.textContent = file.formatted_size;
         elements.mediaIndexBadge.textContent = `${index + 1} of ${state.filteredFiles.length}`;
         elements.btnDeleteMedia.disabled = !!file.fileObject && !state.browserFolderHandle;
+        elements.btnOpenExternalMedia.disabled = false;
 
         elements.viewerEmptyState.hidden = true;
         elements.imageViewerMode.hidden = true;
@@ -1161,6 +1163,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.mediaSizeBadge.textContent = '-';
         elements.mediaIndexBadge.textContent = '0 of 0';
         elements.btnDeleteMedia.disabled = true;
+        elements.btnOpenExternalMedia.disabled = true;
         elements.viewerEmptyState.hidden = false;
         elements.imageViewerMode.hidden = true;
         elements.videoViewerMode.hidden = true;
@@ -1172,6 +1175,31 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.activeAudioPlayer.removeAttribute('src');
 
         updateSelectionUI();
+    }
+
+    function openActiveMediaExternally() {
+        if (state.activeFileIndex === -1) return;
+        const activeFile = state.filteredFiles[state.activeFileIndex];
+        if (!activeFile) return;
+
+        let mediaUrl = `/api/media?path=${encodeURIComponent(activeFile.path)}`;
+        if (activeFile.fileObject) {
+            const mimeType = getBrowserMimeType(activeFile.name);
+            const blob = activeFile.fileObject.slice(0, activeFile.fileObject.size, mimeType || activeFile.fileObject.type || 'application/octet-stream');
+            mediaUrl = URL.createObjectURL(blob);
+        }
+
+        const win = window.open(mediaUrl, '_blank', 'noopener,noreferrer');
+        if (!win) {
+            showToast('Pop-up blocked. Please allow pop-ups to open the file externally.', 'error');
+            return;
+        }
+
+        if (activeFile.fileObject) {
+            setTimeout(() => {
+                URL.revokeObjectURL(mediaUrl);
+            }, 8000);
+        }
     }
 
     function openDeleteConfirmModal() {

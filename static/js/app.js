@@ -1074,7 +1074,47 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.imageViewerMode.hidden = false;
         } else if (file.media_type === 'video') {
             elements.activeVideoPlayer.pause();
+            elements.activeVideoPlayer.removeAttribute('style');
             elements.activeVideoPlayer.src = mediaUrl;
+
+            // When metadata loads, adjust sizing to fit container based on aspect ratio
+            const onMeta = () => {
+                try {
+                    const w = elements.activeVideoPlayer.videoWidth || 0;
+                    const h = elements.activeVideoPlayer.videoHeight || 0;
+                    // Default: contain within available area
+                    elements.activeVideoPlayer.style.objectFit = 'contain';
+                    if (w > 0 && h > 0) {
+                        if (w >= h) {
+                            // landscape: fill width, limit height
+                            elements.activeVideoPlayer.style.width = '96%';
+                            elements.activeVideoPlayer.style.height = 'auto';
+                            elements.activeVideoPlayer.style.maxHeight = '92%';
+                        } else {
+                            // portrait: fill height, limit width
+                            elements.activeVideoPlayer.style.height = '92%';
+                            elements.activeVideoPlayer.style.width = 'auto';
+                            elements.activeVideoPlayer.style.maxWidth = '96%';
+                        }
+                    } else {
+                        // fallback sizing
+                        elements.activeVideoPlayer.style.maxWidth = '96%';
+                        elements.activeVideoPlayer.style.maxHeight = '92%';
+                    }
+                } catch (e) {
+                    // ignore sizing errors
+                }
+                // remove listener after first run
+                elements.activeVideoPlayer.removeEventListener('loadedmetadata', onMeta);
+            };
+
+            elements.activeVideoPlayer.addEventListener('loadedmetadata', onMeta);
+
+            // handle decode/play errors gracefully
+            elements.activeVideoPlayer.addEventListener('error', (ev) => {
+                console.warn('Video element error', ev);
+            });
+
             elements.activeVideoPlayer.load();
             elements.videoViewerMode.hidden = false;
             elements.activeVideoPlayer.play().catch(() => {});

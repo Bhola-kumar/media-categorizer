@@ -1053,18 +1053,19 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.activeImageViewer.src = mediaUrl;
             elements.imageViewerMode.hidden = false;
         } else if (file.media_type === 'video') {
+            elements.activeVideoPlayer.pause();
             elements.activeVideoPlayer.src = mediaUrl;
+            elements.activeVideoPlayer.load();
             elements.videoViewerMode.hidden = false;
             elements.activeVideoPlayer.play().catch(() => {});
         } else if (file.media_type === 'audio') {
             elements.audioFileName.textContent = file.name;
             elements.audioFileMeta.textContent = `${file.formatted_size} • ${file.extension.toUpperCase()}`;
             elements.activeAudioPlayer.src = mediaUrl;
+            elements.activeAudioPlayer.load();
             elements.audioViewerMode.hidden = false;
             elements.activeAudioPlayer.play().catch(() => {});
         }
-
-
 
         renderFileList();
         const activeRow = elements.fileListContainer.children[index];
@@ -1083,7 +1084,10 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.videoViewerMode.hidden = true;
         elements.audioViewerMode.hidden = true;
         elements.activeVideoPlayer.pause();
+        elements.activeVideoPlayer.removeAttribute('src');
+        elements.activeVideoPlayer.load();
         elements.activeAudioPlayer.pause();
+        elements.activeAudioPlayer.removeAttribute('src');
 
         updateSelectionUI();
     }

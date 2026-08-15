@@ -1075,6 +1075,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (file.media_type === 'video') {
             elements.activeVideoPlayer.pause();
             elements.activeVideoPlayer.removeAttribute('style');
+            // If we are using a server-served media URL (not a blob) and the browser
+            // reports it cannot play the reported mime type, request a transcoded MP4
+            // from the server by adding `&transcode=1`.
+            if (!file.fileObject && file.mime_type) {
+                const canPlay = elements.activeVideoPlayer.canPlayType(file.mime_type || '');
+                console.debug('canPlayType', file.mime_type, canPlay);
+                if (!canPlay || canPlay === '') {
+                    // request server-side transcode to H.264 mp4
+                    mediaUrl += '&transcode=1';
+                }
+            }
+
             elements.activeVideoPlayer.src = mediaUrl;
 
             // When metadata loads, adjust sizing to fit container based on aspect ratio

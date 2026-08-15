@@ -7,6 +7,9 @@ import subprocess
 import json
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import after_this_request
+import tempfile
+import shutil
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -461,6 +464,7 @@ def undo_last_action():
 @app.route('/api/media')
 def stream_media():
     file_path = request.args.get('path', '').strip()
+    transcode = request.args.get('transcode', '')
     if not file_path or not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
 
@@ -494,6 +498,34 @@ def stream_media():
     range_header = request.headers.get('Range', None)
 
     if not range_header:
+        # If client requested a transcoded stream, attempt to transcode to H.264 MP4
+        if transcode and ext in VIDEO_EXTENSIONS:
+            ffmpeg_exe = shutil.which('ffmpeg')
+            if ffmpeg_exe:
+                try:
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                    tmp_name = tmp.name
+                    tmp.close()
+                    cmd = [ffmpeg_exe, '-y', '-i', file_path, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', tmp_name]
+                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+
+                    @after_this_request
+                    def remove_file(response):
+                        try:
+                            os.unlink(tmp_name)
+                        except Exception:
+                            pass
+                        return response
+
+                    return send_file(tmp_name, mimetype='video/mp4')
+                except Exception as e:
+                    print(f"Transcode failed: {e}")
+                    try:
+                        if os.path.exists(tmp_name):
+                            os.unlink(tmp_name)
+                    except Exception:
+                        pass
+            # if ffmpeg not available or transcode failed, fall through to send original
         return send_file(file_path, mimetype=mime_type)
 
     byte_str = range_header.replace('bytes=', '')

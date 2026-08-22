@@ -20,6 +20,112 @@ IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.
 VIDEO_EXTENSIONS = {'.mp4', '.webm', '.ogg', '.mov', '.mkv', '.avi', '.wmv', '.m4v'}
 AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.wma'}
 
+import hashlib
+
+# Directory for caching transcoded videos
+TRANSCODE_CACHE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '.transcode_cache'))
+try:
+    os.makedirs(TRANSCODE_CACHE_DIR, exist_ok=True)
+except Exception:
+    pass
+
+def get_ffmpeg_exe():
+    exe = shutil.which('ffmpeg')
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+def parse_mp4_codecs(filepath):
+    codecs = {'video_codec': None, 'audio_codec': None, 'has_video': False, 'has_audio': False, 'needs_transcode': False}
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        
+        limit = len(data)
+        
+        def walk_boxes(offset, end):
+            p = offset
+            found = []
+            while p + 8 <= end:
+                box_len = struct.unpack('>I', data[p:p+4])[0]
+                box_type = data[p+4:p+8].decode('latin1', errors='ignore')
+                hdr_len = 8
+                if box_len == 1:
+                    if p + 16 > end: break
+                    box_len = struct.unpack('>Q', data[p+8:p+16])[0]
+                    hdr_len = 16
+                elif box_len == 0:
+                    box_len = end - p
+                    
+                box_end = min(p + box_len, end)
+                if box_type == 'stsd' and box_end - (p + hdr_len) >= 8:
+                    entry_count = struct.unpack('>I', data[p+hdr_len+4:p+hdr_len+8])[0]
+                    epos = p + hdr_len + 8
+                    for _ in range(entry_count):
+                        if epos + 8 <= box_end:
+                            entry_len = struct.unpack('>I', data[epos:epos+4])[0]
+                            entry_type = data[epos+4:epos+8].decode('latin1', errors='ignore')
+                            found.append(entry_type)
+                            epos += entry_len
+                elif box_type in ['moov', 'trak', 'mdia', 'minf', 'stbl']:
+                    found.extend(walk_boxes(p + hdr_len, box_end))
+                p = box_end
+                if box_len <= 0: break
+            return found
+
+        entries = walk_boxes(0, limit)
+        for entry in entries:
+            if entry in ['hvc1', 'hev1', 's263', 'dvh1', 'dvhe']:
+                codecs['video_codec'] = 'hevc'
+                codecs['has_video'] = True
+                codecs['needs_transcode'] = True
+            elif entry in ['avc1', 'avc3']:
+                codecs['video_codec'] = 'h264'
+                codecs['has_video'] = True
+            elif entry == 'vp09':
+                codecs['video_codec'] = 'vp9'
+                codecs['has_video'] = True
+            elif entry == 'av01':
+                codecs['video_codec'] = 'av1'
+                codecs['has_video'] = True
+            elif entry == 'mp4a':
+                codecs['audio_codec'] = 'aac'
+                codecs['has_audio'] = True
+    except Exception:
+        pass
+    return codecs
+
+def get_video_info(filepath):
+    ffmpeg_exe = get_ffmpeg_exe()
+    if ffmpeg_exe:
+        try:
+            res = subprocess.run([ffmpeg_exe, '-i', filepath], capture_output=True, text=True, timeout=10)
+            info = {'video_codec': None, 'audio_codec': None, 'has_video': False, 'has_audio': False, 'needs_transcode': False}
+            for line in res.stderr.splitlines():
+                if 'Stream #' in line:
+                    if 'Video:' in line:
+                        info['has_video'] = True
+                        parts = line.split('Video:')[1].strip().split()
+                        if parts:
+                            codec = parts[0].strip(',').lower()
+                            info['video_codec'] = codec
+                            if codec in ['hevc', 'h265', 'mpeg4', 'wmv3', 'vc1', 'prores']:
+                                info['needs_transcode'] = True
+                    elif 'Audio:' in line:
+                        info['has_audio'] = True
+                        parts = line.split('Audio:')[1].strip().split()
+                        if parts:
+                            info['audio_codec'] = parts[0].strip(',').lower()
+            if info['has_video'] or info['has_audio']:
+                return info
+        except Exception:
+            pass
+    return parse_mp4_codecs(filepath)
+
 def get_media_type(filename):
     ext = Path(filename).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
@@ -82,18 +188,17 @@ def open_folder_dialog():
     return jsonify({'success': False, 'message': 'No folder selected or dialog cancelled'})
 
 def resolve_full_folder_path(folder_input):
-    """Smartly resolves a folder input (whether relative or folder name) to a full absolute path."""
+    """Smartly resolves a folder or file input (whether relative, folder name, or filename) to a full absolute path."""
     if not folder_input:
         return None
 
     clean_path = folder_input.strip()
 
     # 1. Direct path check
-    if os.path.exists(clean_path) and os.path.isdir(clean_path):
+    if os.path.exists(clean_path):
         return os.path.abspath(clean_path)
 
-    # 2. Search common user directories for matching folder name
-    folder_name = os.path.basename(clean_path.rstrip('/\\'))
+    filename = os.path.basename(clean_path.rstrip('/\\'))
     home = Path.home()
     
     search_roots = [
@@ -110,13 +215,20 @@ def resolve_full_folder_path(folder_input):
     for root in search_roots:
         try:
             if root.exists():
-                candidate = root / folder_name
-                if candidate.exists() and candidate.is_dir():
+                candidate = root / clean_path
+                if candidate.exists():
                     return str(candidate.resolve())
+                candidate_fn = root / filename
+                if candidate_fn.exists():
+                    return str(candidate_fn.resolve())
+                for item in root.iterdir():
+                    if item.is_dir() and not item.name.startswith('.'):
+                        sub_cand = item / filename
+                        if sub_cand.exists():
+                            return str(sub_cand.resolve())
         except Exception:
             continue
 
-    # 3. Fallback: resolve as relative path to CWD or Home
     try:
         candidate = Path.cwd() / clean_path
         return str(candidate.resolve())
@@ -158,7 +270,7 @@ def scan_folder():
                 if media_type:
                     stat = entry.stat()
                     mime_type, _ = mimetypes.guess_type(entry.name)
-                    media_files.append({
+                    item = {
                         'id': entry.name,
                         'name': entry.name,
                         'path': entry.path,
@@ -169,7 +281,13 @@ def scan_folder():
                         'extension': Path(entry.name).suffix.lower(),
                         'modified_time': stat.st_mtime,
                         'modified_formatted': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stat.st_mtime))
-                    })
+                    }
+                    if media_type == 'video':
+                        vinfo = get_video_info(entry.path)
+                        item['video_codec'] = vinfo.get('video_codec')
+                        item['audio_codec'] = vinfo.get('audio_codec')
+                        item['needs_transcode'] = vinfo.get('needs_transcode', False)
+                    media_files.append(item)
     except Exception as e:
         return jsonify({'error': f'Failed to read directory: {str(e)}'}), 500
 
@@ -466,9 +584,57 @@ def stream_media():
     file_path = request.args.get('path', '').strip()
     transcode = request.args.get('transcode', '')
     if not file_path or not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'}), 404
+        resolved = resolve_full_folder_path(file_path)
+        if resolved and os.path.exists(resolved):
+            file_path = resolved
+        else:
+            return jsonify({'error': 'File not found'}), 404
 
     ext = os.path.splitext(file_path)[1].lower()
+    serve_path = file_path
+    
+    # Auto-detect if video needs transcoding (e.g. HEVC/H.265) or if client explicitly requested transcode
+    should_transcode = False
+    if ext in VIDEO_EXTENSIONS:
+        if transcode == '1':
+            should_transcode = True
+        else:
+            vinfo = get_video_info(file_path)
+            if vinfo.get('needs_transcode'):
+                should_transcode = True
+
+    if should_transcode:
+        ffmpeg_exe = get_ffmpeg_exe()
+        if ffmpeg_exe:
+            try:
+                abs_src = os.path.abspath(file_path)
+                st = os.stat(abs_src)
+                cache_key = hashlib.md5(f"{abs_src}_{st.st_mtime}_{st.st_size}".encode('utf-8')).hexdigest() + '.mp4'
+                cached_file = os.path.join(TRANSCODE_CACHE_DIR, cache_key)
+                
+                if not os.path.exists(cached_file) or os.path.getsize(cached_file) == 0:
+                    tmp_file = cached_file + '.tmp.mp4'
+                    cmd = [
+                        ffmpeg_exe, '-y',
+                        '-i', abs_src,
+                        '-c:v', 'libx264',
+                        '-preset', 'ultrafast',
+                        '-crf', '23',
+                        '-c:a', 'aac',
+                        '-b:a', '128k',
+                        '-movflags', '+faststart',
+                        tmp_file
+                    ]
+                    with open(os.devnull, 'w') as devnull:
+                        ret = subprocess.call(cmd, stdout=devnull, stderr=devnull)
+                    if ret == 0 and os.path.exists(tmp_file):
+                        shutil.move(tmp_file, cached_file)
+
+                if os.path.exists(cached_file) and os.path.getsize(cached_file) > 0:
+                    serve_path = cached_file
+            except Exception as e:
+                print(f"Transcode streaming fallback error: {e}")
+
     ext_mime_map = {
         '.mp4': 'video/mp4',
         '.m4v': 'video/mp4',
@@ -488,45 +654,17 @@ def stream_media():
         '.webp': 'image/webp'
     }
 
-    mime_type = ext_mime_map.get(ext)
+    mime_type = ext_mime_map.get(os.path.splitext(serve_path)[1].lower())
     if not mime_type:
-        mime_type, _ = mimetypes.guess_type(file_path)
+        mime_type, _ = mimetypes.guess_type(serve_path)
         if not mime_type:
             mime_type = 'video/mp4' if ext in VIDEO_EXTENSIONS else 'application/octet-stream'
 
-    file_size = os.path.getsize(file_path)
+    file_size = os.path.getsize(serve_path)
     range_header = request.headers.get('Range', None)
 
     if not range_header:
-        # If client requested a transcoded stream, attempt to transcode to H.264 MP4
-        if transcode and ext in VIDEO_EXTENSIONS:
-            ffmpeg_exe = shutil.which('ffmpeg')
-            if ffmpeg_exe:
-                try:
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-                    tmp_name = tmp.name
-                    tmp.close()
-                    cmd = [ffmpeg_exe, '-y', '-i', file_path, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', tmp_name]
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
-
-                    @after_this_request
-                    def remove_file(response):
-                        try:
-                            os.unlink(tmp_name)
-                        except Exception:
-                            pass
-                        return response
-
-                    return send_file(tmp_name, mimetype='video/mp4')
-                except Exception as e:
-                    print(f"Transcode failed: {e}")
-                    try:
-                        if os.path.exists(tmp_name):
-                            os.unlink(tmp_name)
-                    except Exception:
-                        pass
-            # if ffmpeg not available or transcode failed, fall through to send original
-        return send_file(file_path, mimetype=mime_type)
+        return send_file(serve_path, mimetype=mime_type)
 
     byte_str = range_header.replace('bytes=', '')
     parts = byte_str.split('-')
@@ -538,7 +676,7 @@ def stream_media():
 
     length = end - start + 1
 
-    with open(file_path, 'rb') as f:
+    with open(serve_path, 'rb') as f:
         f.seek(start)
         data = f.read(length)
 

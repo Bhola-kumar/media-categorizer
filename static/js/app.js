@@ -169,15 +169,38 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.isBrowsing) return;
         state.isBrowsing = true;
         try {
-            // 1. Backend native folder picker (when running with Python/Flask backend locally)
-            if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
-                showToast('Opening folder selector...', 'info');
+            // 1. Try native browser directory picker API first (Chrome / Edge / Opera)
+            // MUST be invoked synchronously inside the click gesture handler!
+            if (window.showDirectoryPicker) {
                 try {
-                    const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                    state.browserFolderHandle = dirHandle;
+                    state.browserScanMode = true;
+                    if (elements.folderPathInput) {
+                        elements.folderPathInput.value = dirHandle.name;
+                    }
+                    await scanBrowserFolder(dirHandle);
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        showToast('Folder selection cancelled.', 'info');
+                        return;
+                    }
+                    console.warn('window.showDirectoryPicker fallback:', err);
+                }
+            }
+
+            // 2. Fallback to Flask backend native folder dialog (/api/open-folder-dialog)
+            if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+                showToast('Opening folder selector window...', 'info');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+                try {
+                    const res = await fetch('/api/open-folder-dialog', { method: 'POST', signal: controller.signal });
+                    clearTimeout(timeoutId);
                     const data = await res.json();
                     if (data.success && data.path) {
                         if (elements.folderPathInput) elements.folderPathInput.value = data.path;
-                        hideModal(elements.folderPickerModal);
                         await scanFolder(data.path);
                         return;
                     }
@@ -186,58 +209,50 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (data.message) {
                         showToast(data.message, 'error');
                     }
-                    return;
                 } catch (err) {
-                    console.warn('Native dialog error:', err);
-                    showToast('Folder picker failed. Please try again.', 'error');
-                    return;
-                }
-            }
-
-            // 2. Native browser directory picker API (for modern web browsers e.g. Chrome/Edge)
-            if (window.showDirectoryPicker) {
-                try {
-                    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-                    state.browserFolderHandle = dirHandle;
-                    state.browserScanMode = true;
-                    if (elements.folderPathInput) {
-                        elements.folderPathInput.value = dirHandle.name;
-                        elements.folderPathInput.title = `Local folder selected: ${dirHandle.name}`;
-                    }
-                    hideModal(elements.folderPickerModal);
-                    await scanBrowserFolder(dirHandle);
-                } catch (err) {
+                    clearTimeout(timeoutId);
                     if (err.name === 'AbortError') {
-                        showToast('Folder selection cancelled.', 'info');
+                        showToast('Folder dialog request timed out.', 'error');
                     } else {
-                        console.error('Browser folder picker error:', err);
-                        showToast('Unable to access folder in browser.', 'error');
+                        console.warn('Native dialog error:', err);
                     }
                 }
-                return;
             }
-
-            // 3. Fallback for legacy browsers without showDirectoryPicker and without backend
-            showModal(elements.folderPickerModal);
-            showToast('Your browser does not support folder picker dialog. Please paste the folder path into the dialog and click Scan Folder.', 'info');
         } finally {
             state.isBrowsing = false;
         }
     }
 
     /**
-     * Opens native OS or Browser Folder Selector for base target directory directly without intermediate modal.
-     * Automatically configures target base directory upon selection.
+     * Opens native OS or Browser Folder Selector for base target directory.
      */
     async function browseTargetFolder() {
         if (state.isBrowsing) return;
         state.isBrowsing = true;
         try {
-            // 1. Backend native folder picker (when running with Python/Flask backend locally)
+            // 1. Try native browser directory picker API first (Chrome / Edge / Opera)
+            if (window.showDirectoryPicker) {
+                try {
+                    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                    state.browserTargetHandle = dirHandle;
+                    setTargetBasePath(dirHandle.name);
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        showToast('Folder selection cancelled.', 'info');
+                        return;
+                    }
+                }
+            }
+
+            // 2. Fallback to Flask backend native folder dialog (/api/open-folder-dialog)
             if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
                 showToast('Opening target folder selector...', 'info');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
                 try {
-                    const res = await fetch('/api/open-folder-dialog', { method: 'POST' });
+                    const res = await fetch('/api/open-folder-dialog', { method: 'POST', signal: controller.signal });
+                    clearTimeout(timeoutId);
                     const data = await res.json();
                     if (data.success && data.path) {
                         setTargetBasePath(data.path);
@@ -248,35 +263,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (data.message) {
                         showToast(data.message, 'error');
                     }
-                    return;
                 } catch (err) {
+                    clearTimeout(timeoutId);
                     console.warn('Native dialog error:', err);
-                    showToast('Folder picker failed. Please try again.', 'error');
-                    return;
                 }
-            }
-
-            // 2. Native browser directory picker API (for modern web browsers e.g. Chrome/Edge)
-            if (window.showDirectoryPicker) {
-                try {
-                    const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-                    state.browserTargetHandle = dirHandle;
-                    setTargetBasePath(dirHandle.name);
-                } catch (err) {
-                    if (err.name === 'AbortError') {
-                        showToast('Folder selection cancelled.', 'info');
-                    } else {
-                        console.error('Browser folder picker error:', err);
-                        showToast('Unable to access target folder in browser.', 'error');
-                    }
-                }
-                return;
-            }
-
-            // 3. Fallback for legacy browsers without showDirectoryPicker and without backend
-            if (elements.targetBaseModal) {
-                elements.targetBasePathInput.value = state.targetBasePath || '';
-                showModal(elements.targetBaseModal);
             }
         } finally {
             state.isBrowsing = false;
@@ -670,6 +660,92 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function detectBrowserMp4Codec(fileObject) {
+        if (!fileObject || !fileObject.name.toLowerCase().endsWith('.mp4')) return { codec: 'h264', needs_transcode: false };
+        try {
+            let buf;
+            if (fileObject.size <= 4 * 1024 * 1024) {
+                buf = await fileObject.arrayBuffer();
+            } else {
+                const head = await fileObject.slice(0, 1024 * 1024).arrayBuffer();
+                const tailStart = Math.max(0, fileObject.size - 2 * 1024 * 1024);
+                const tail = await fileObject.slice(tailStart, fileObject.size).arrayBuffer();
+                const combined = new Uint8Array(head.byteLength + tail.byteLength);
+                combined.set(new Uint8Array(head), 0);
+                combined.set(new Uint8Array(tail), head.byteLength);
+                buf = combined.buffer;
+            }
+
+            const data = new DataView(buf);
+            const len = buf.byteLength;
+
+            function readType(offset) {
+                let s = '';
+                for (let i = 0; i < 4; i++) {
+                    if (offset + i < len) s += String.fromCharCode(data.getUint8(offset + i));
+                }
+                return s;
+            }
+
+            function walk(offset, limit) {
+                let p = offset;
+                let found = [];
+                while (p + 8 <= limit) {
+                    let boxLen = data.getUint32(p);
+                    let boxType = readType(p + 4);
+                    let hdrLen = 8;
+                    if (boxLen === 1) {
+                        if (p + 16 > limit) break;
+                        const high = data.getUint32(p + 8);
+                        const low = data.getUint32(p + 12);
+                        boxLen = high * 4294967296 + low;
+                        hdrLen = 16;
+                    } else if (boxLen === 0) {
+                        boxLen = limit - p;
+                    }
+                    const boxEnd = Math.min(p + boxLen, limit);
+                    if (boxType === 'stsd' && boxEnd - (p + hdrLen) >= 8) {
+                        const count = data.getUint32(p + hdrLen + 4);
+                        let epos = p + hdrLen + 8;
+                        for (let i = 0; i < count; i++) {
+                            if (epos + 8 <= boxEnd) {
+                                const entryLen = data.getUint32(epos);
+                                const entryType = readType(epos + 4);
+                                found.push(entryType);
+                                epos += entryLen;
+                            }
+                        }
+                    } else if (['moov', 'trak', 'mdia', 'minf', 'stbl'].includes(boxType)) {
+                        found = found.concat(walk(p + hdrLen, boxEnd));
+                    }
+                    p = boxEnd;
+                    if (boxLen <= 0) break;
+                }
+                return found;
+            }
+
+            const entries = walk(0, len);
+            for (const entry of entries) {
+                if (['hvc1', 'hev1', 's263', 'dvh1', 'dvhe'].includes(entry)) {
+                    return { codec: 'hevc', needs_transcode: true };
+                }
+                if (['avc1', 'avc3'].includes(entry)) {
+                    return { codec: 'h264', needs_transcode: false };
+                }
+            }
+
+            let str = '';
+            const u8 = new Uint8Array(buf);
+            for (let i = 0; i < u8.length; i++) str += String.fromCharCode(u8[i]);
+            if (str.includes('hvc1') || str.includes('hev1') || str.includes('dvh1') || str.includes('dvhe')) {
+                return { codec: 'hevc', needs_transcode: true };
+            }
+        } catch (e) {
+            console.warn('Error parsing MP4 header in browser:', e);
+        }
+        return { codec: 'h264', needs_transcode: false };
+    }
+
     async function scanBrowserFolder(dirHandle) {
         showFolderLoading('Scanning folder contents...');
         const files = [];
@@ -688,6 +764,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 try {
                     const file = await entry.getFile();
+                    let codecInfo = { codec: null, needs_transcode: false };
+                    if (mediaType === 'video') {
+                        codecInfo = await detectBrowserMp4Codec(file);
+                    }
+
                     files.push({
                         id: `${relativePath}${entry.name}`,
                         name: entry.name,
@@ -699,7 +780,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         extension: `.${ext}`,
                         modified_time: file.lastModified,
                         modified_formatted: new Date(file.lastModified).toLocaleString(),
-                        fileObject: file
+                        fileObject: file,
+                        video_codec: codecInfo.codec,
+                        needs_transcode: codecInfo.needs_transcode
                     });
                 } catch (err) {
                     console.warn('Failed to read file from browser handle:', err);
@@ -1047,7 +1130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function selectMediaIndex(index) {
+    async function selectMediaIndex(index) {
         if (index < 0 || index >= state.filteredFiles.length) return;
         state.activeFileIndex = index;
         const file = state.filteredFiles[index];
@@ -1080,24 +1163,81 @@ document.addEventListener('DOMContentLoaded', () => {
             state.activeObjectUrl = mediaUrl;
         }
 
-        if (file.media_type === 'image') {
-            resetImageTransform();
-            elements.activeImageViewer.src = mediaUrl;
-            elements.imageViewerMode.hidden = false;
-        } else if (file.media_type === 'video') {
-            elements.activeVideoPlayer.pause();
-            elements.activeVideoPlayer.removeAttribute('style');
-            // If we are using a server-served media URL (not a blob) and the browser
-            // reports it cannot play the reported mime type, request a transcoded MP4
-            // from the server by adding `&transcode=1`.
-            if (!file.fileObject && file.mime_type) {
-                const canPlay = elements.activeVideoPlayer.canPlayType(file.mime_type || '');
-                console.debug('canPlayType', file.mime_type, canPlay);
-                if (!canPlay || canPlay === '') {
-                    // request server-side transcode to H.264 mp4
-                    mediaUrl += '&transcode=1';
+        function isHevcCodec(codec) {
+            return codec === 'hevc' || codec === 'h265' || codec === 'hvc1' || codec === 'hev1';
+        }
+
+    let ffmpegWasmInstance = null;
+
+    async function transcodeVideoInBrowserWasm(fileObject) {
+        if (!window.FFmpeg) return null;
+        try {
+            if (!ffmpegWasmInstance) {
+                const { createFFmpeg } = window.FFmpeg;
+                ffmpegWasmInstance = createFFmpeg({ log: false });
+            }
+            if (!ffmpegWasmInstance.isLoaded()) {
+                showToast('Initializing browser video transcoder...', 'info');
+                await ffmpegWasmInstance.load();
+            }
+            const { fetchFile } = window.FFmpeg;
+            const inName = 'input_' + Date.now() + '_' + fileObject.name;
+            const outName = 'output_' + Date.now() + '.mp4';
+            
+            showToast('Transcoding HEVC video for browser preview...', 'info');
+            ffmpegWasmInstance.FS('writeFile', inName, await fetchFile(fileObject));
+            await ffmpegWasmInstance.run('-i', inName, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'copy', outName);
+            
+            const data = ffmpegWasmInstance.FS('readFile', outName);
+            ffmpegWasmInstance.FS('unlink', inName);
+            ffmpegWasmInstance.FS('unlink', outName);
+
+            const blob = new Blob([data.buffer], { type: 'video/mp4' });
+            return URL.createObjectURL(blob);
+        } catch (err) {
+            console.warn('In-browser WASM transcode error:', err);
+            return null;
+        }
+    }
+
+    if (file.media_type === 'image') {
+        resetImageTransform();
+        elements.activeImageViewer.src = mediaUrl;
+        elements.imageViewerMode.hidden = false;
+    } else if (file.media_type === 'video') {
+        elements.activeVideoPlayer.pause();
+        elements.activeVideoPlayer.removeAttribute('style');
+
+        // Dynamic codec check if not performed during scan
+        if (file.fileObject && (file.needs_transcode === undefined || !file.video_codec)) {
+            try {
+                const codecCheck = await detectBrowserMp4Codec(file.fileObject);
+                file.video_codec = codecCheck.codec;
+                file.needs_transcode = codecCheck.needs_transcode;
+            } catch (e) {}
+        }
+
+        const canPlayHevc = elements.activeVideoPlayer.canPlayType('video/mp4; codecs="hvc1"');
+        const isHevc = isHevcCodec(file.video_codec) || file.needs_transcode;
+        const requiresTranscode = isHevc || (file.mime_type && !elements.activeVideoPlayer.canPlayType(file.mime_type));
+
+        if (requiresTranscode && (!canPlayHevc || canPlayHevc === '')) {
+            if (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+                const filePath = file.name || file.path;
+                mediaUrl = `/api/media?path=${encodeURIComponent(filePath)}&transcode=1`;
+            } else if (file.fileObject && window.FFmpeg) {
+                const wasmUrl = await transcodeVideoInBrowserWasm(file.fileObject);
+                if (wasmUrl) {
+                    mediaUrl = wasmUrl;
+                    state.activeObjectUrl = wasmUrl;
                 }
             }
+        } else if (!file.fileObject && file.mime_type) {
+            const canPlay = elements.activeVideoPlayer.canPlayType(file.mime_type || '');
+            if (!canPlay || canPlay === '') {
+                mediaUrl += (mediaUrl.includes('?') ? '&' : '?') + 'transcode=1';
+            }
+        }
 
             elements.activeVideoPlayer.src = mediaUrl;
 
@@ -1106,38 +1246,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const w = elements.activeVideoPlayer.videoWidth || 0;
                     const h = elements.activeVideoPlayer.videoHeight || 0;
-                    // Default: contain within available area
                     elements.activeVideoPlayer.style.objectFit = 'contain';
                     if (w > 0 && h > 0) {
                         if (w >= h) {
-                            // landscape: fill width, limit height
                             elements.activeVideoPlayer.style.width = '96%';
                             elements.activeVideoPlayer.style.height = 'auto';
                             elements.activeVideoPlayer.style.maxHeight = '92%';
                         } else {
-                            // portrait: fill height, limit width
                             elements.activeVideoPlayer.style.height = '92%';
                             elements.activeVideoPlayer.style.width = 'auto';
                             elements.activeVideoPlayer.style.maxWidth = '96%';
                         }
                     } else {
-                        // fallback sizing
                         elements.activeVideoPlayer.style.maxWidth = '96%';
                         elements.activeVideoPlayer.style.maxHeight = '92%';
                     }
-                } catch (e) {
-                    // ignore sizing errors
-                }
-                // remove listener after first run
+                } catch (e) {}
                 elements.activeVideoPlayer.removeEventListener('loadedmetadata', onMeta);
             };
 
             elements.activeVideoPlayer.addEventListener('loadedmetadata', onMeta);
 
-            // handle decode/play errors gracefully
-            elements.activeVideoPlayer.addEventListener('error', (ev) => {
-                console.warn('Video element error', ev);
-            });
+            // Handle playback/decode errors gracefully by falling back to backend transcode if available
+            const onErr = (ev) => {
+                console.warn('Video element playback error:', ev);
+                if (!mediaUrl.includes('transcode=1') && (state.backendEnabled || location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:')) {
+                    console.log('Retrying video playback with server-side transcoding...');
+                    const filePath = file.name || file.path;
+                    const fallbackUrl = `/api/media?path=${encodeURIComponent(filePath)}&transcode=1`;
+                    elements.activeVideoPlayer.src = fallbackUrl;
+                    elements.activeVideoPlayer.load();
+                    elements.activeVideoPlayer.play().catch(() => {});
+                }
+            };
+            elements.activeVideoPlayer.addEventListener('error', onErr, { once: true });
 
             elements.activeVideoPlayer.load();
             elements.videoViewerMode.hidden = false;
